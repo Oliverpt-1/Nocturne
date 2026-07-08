@@ -1,0 +1,16 @@
+[package]
+name = "nocturne-offers"
+version = "0.1.0"
+edition = "2021"
+description = "Off-chain EIP-712 offer-tree hashing, Merkle proofs, and signing for Morpho Midnight (Nocturne maker engine)."
+
+[dependencies]
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+k256 = { version = "0.13", features = ["ecdsa"] }
+rayon = "1.10"
+
+[dev-dependencies]
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
