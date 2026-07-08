@@ -1,7 +1,6 @@
-# midnight-rust
+# Nocturne
 
 Off-chain Rust tooling for [Morpho Midnight](https://github.com/morpho-org/midnight).
-Internal engine name: **Nocturne**.
 
 First component: `nocturne-offers` — a byte-for-byte mirror of Midnight's EIP-712
 offer-tree signing (`HashLib.sol` + `EcrecoverRatifier`), for market makers who
