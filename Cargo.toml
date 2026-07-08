@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["crates/nocturne-offers"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
