@@ -1,0 +1,8 @@
+{
+  "name": "nocturne-bench-baseline",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "ethers": "^6.13.0"
+  }
+}
