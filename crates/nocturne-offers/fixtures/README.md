@@ -6,6 +6,8 @@ Authoritative test vectors for `nocturne-offers`, generated from the Midnight co
   digest exactly as `EcrecoverRatifier.isRatified`, signs it, and asserts the **real** on-chain
   `isRatified` accepts the signature, then prints every value. These printed values are baked
   into `../tests/parity_e2e.rs`.
+- `GenSim.t.sol` — prints `TickLib.tickToPrice` for a spread of ticks; the values are baked into
+  `../tests/sim_parity.rs`.
 
 This is intentionally **not** part of `cargo test`: the Rust test carries the constants so the
 crate builds and tests standalone (same pattern as the typehash constants in `../tests/parity.rs`).

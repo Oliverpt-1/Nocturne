@@ -3,9 +3,9 @@
 Off-chain Rust tooling for [Morpho Midnight](https://github.com/morpho-org/midnight).
 
 `nocturne-offers` is a byte-for-byte mirror of Midnight's EIP-712 offer-tree signing
-(`HashLib.sol` + `EcrecoverRatifier`): hash offers, build the Merkle tree and proofs, sign
-the root, recover/verify signatures, and validate offers against the `take` rules — all
-locally, in native code, across cores.
+(`HashLib.sol` + `EcrecoverRatifier`): build offers, hash them, build the Merkle tree and
+proofs, sign the root, recover/verify signatures, validate offers against the `take` rules,
+and simulate a take locally — all in native code, across cores.
 
 ```toml
 [dependencies]
@@ -16,11 +16,34 @@ nocturne-offers = { path = "crates/nocturne-offers" }
 use nocturne_offers::*;
 ```
 
-Types: `Word = [u8; 32]`, `Address = [u8; 20]`. `uint256` fields (`chain_id`, `tick`,
-`maturity`, …) are `Word` (big-endian). The tools below assume `offers: Vec<Offer>`,
-`sk: SigningKey`, `chain_id: Word`, and `ratifier: Address` are in scope.
+Types: `Word = [u8; 32]`, `Address = [u8; 20]`. On the wire, `uint256` fields (`chain_id`,
+`tick`, `maturity`, …) are `Word` (big-endian) so hashing is byte-exact; the builder and
+simulator work in `U256` (re-exported from `ruint`, the primitive alloy/reth/foundry use) and
+convert for you (`u256_to_word` / `word_to_u256` / `word_to_u128`). The tools below assume
+`offers: Vec<Offer>`, `sk: SigningKey`, `chain_id: Word`, and `ratifier: Address` are in scope.
 
 ---
+
+## Building offers
+
+`OfferBuilder` / `MarketBuilder` take typed inputs (`u64`/`u128`/`U256`/`Address`), apply
+defaults, and pack the wire `Word`s. `try_build` runs `validate_offer` so a malformed offer
+never leaves the builder.
+
+```rust
+let market = MarketBuilder::new(1, midnight_addr, loan_token)
+    .collateral(collat_token, U256::from(860_000_000_000_000_000u64), U256::from(1u64), oracle)
+    .maturity(2_000_000_000)
+    .build();
+
+let offer = OfferBuilder::new(market, maker)
+    .buy()                     // or .sell()
+    .tick(8)
+    .expiry(2_000_000_000)
+    .ratifier(ratifier)
+    .max_units(1_000_000)      // exactly one of max_units / max_assets
+    .try_build(&ctx)?;         // Result<Offer, Vec<OfferError>>; or .build() to skip validation
+```
 
 ## Offer hashing
 
@@ -109,7 +132,36 @@ let ok = can_consume(&offers[0], consumed_so_far, amount);     // does `amount` 
 `StartAfterExpiry`, `UnusedReceiverMustBeZero`, `NoCollateralParams`, `TooManyCollateralParams`,
 `CollateralParamsNotSorted`, `InvalidChainId`, `InvalidMidnight`, `MaturityTooFar`,
 `OfferNotStarted`, `OfferExpired`, `TickNotAccessible`, `MarketLossFactorMaxedOut`,
-`ContinuousFeeAboveOfferCap`.
+`ContinuousFeeAboveOfferCap`, `ConsumedUnits`, `ConsumedAssets`, `SelfTake`,
+`CannotIncreaseDebtPostMaturity`, `MakerCreditOrDebtIncreased`.
+
+## Take simulation
+
+"If a taker lifts this offer for N units, what executes?" — a local port of the `Midnight.take`
+math (`TickLib.tickToPrice`, `settlementFee`, buyer/seller assets, position deltas). Use
+`tick_to_price` / `settlement_fee` / `take_amounts` for just the pricing, or `simulate_take` for
+the full outcome plus locally computable revert reasons.
+
+```rust
+let price = tick_to_price(8)?;                       // WAD, == TickLib.tickToPrice
+let amounts = take_amounts(&offers[0], U256::from(1_000u64), now_ts, cbps)?;
+// amounts.buyer_assets / seller_assets / settlement_fee_assets
+
+let out = simulate_take(&offers[0], U256::from(1_000u64), &SimCtx {
+    now: now_ts,
+    market: SimMarket { tick_spacing: 4, continuous_fee: 100, settlement_fee_cbp: cbps, loss_factor_maxed: false },
+    consumed: consumed_so_far,
+    maker_position: Position::default(),
+    taker_position: Position::default(),
+    taker_is_maker: false,
+})?;
+assert!(out.reverts.is_empty());                     // else: why `take` would revert
+// out.buyer_credit_increase / seller_debt_increase / new_consumed / ...
+```
+
+Scope: the deterministic economic outcome and the take-time reverts. Out of scope (needs live
+chain reads / external calls): gate checks, borrower health, ratifier/authorization, and position
+slashing + fee accrual — positions passed in are assumed already updated.
 
 ## Benchmark (`bin/bench`)
 
@@ -135,14 +187,16 @@ re-quote, which is what the parallel path fans across cores.
 
 ## Correctness (parity)
 
-Every hash is checked against the contract three ways (`cargo test`):
+Everything is checked against the contract (`cargo test`):
 
 1. **Typehashes** — `tests/parity.rs`: each computed typehash equals the `HashLib.sol` constant
    (`COLLATERAL_PARAMS`, `MARKET`, `OFFER`, all 21 `offerTreeTypeHash` heights).
-2. **End-to-end** — `tests/parity_e2e.rs`: a 4-offer tree's leaf / root / digest / recovered
-   signer all match the on-chain values from `fixtures/GenEndToEnd.t.sol`, which drives the real
-   `EcrecoverRatifier.isRatified` and confirms it *accepts* the signature.
-3. **ethers** — the bench and the ethers baseline print the same root to the byte.
+2. **End-to-end signing** — `tests/parity_e2e.rs`: a 4-offer tree's leaf / root / digest /
+   recovered signer all match the on-chain values from `fixtures/GenEndToEnd.t.sol`, which drives
+   the real `EcrecoverRatifier.isRatified` and confirms it *accepts* the signature.
+3. **Tick prices** — `tests/sim_parity.rs`: `tick_to_price` matches `TickLib.tickToPrice`
+   (vectors from `fixtures/GenSim.t.sol`) across the tick range.
+4. **ethers** — the bench and the ethers baseline print the same root to the byte.
 
 ## Run it
 
@@ -157,11 +211,18 @@ cd bench-js && npm i && node bench.js      # ethers baseline (same root)
 ```
 crates/nocturne-offers/
   src/lib.rs                 # hashing + tree + digest + sign/recover/verify
+  src/convert.rs             # Word <-> U256/u128/u64
+  src/builder.rs             # OfferBuilder / MarketBuilder
   src/validate.rs            # validate_offer + consumption helpers
+  src/sim.rs                 # tick_to_price, settlement_fee, take_amounts, simulate_take
   src/bin/bench.rs           # benchmark
   tests/parity.rs            # typehash parity vs HashLib.sol
-  tests/parity_e2e.rs        # end-to-end parity vs the real EcrecoverRatifier
+  tests/parity_e2e.rs        # end-to-end signing parity vs the real EcrecoverRatifier
+  tests/sim_parity.rs        # tick_to_price parity vs TickLib
+  tests/builder.rs           # builder coverage
   tests/validate.rs          # validate_offer coverage
-  fixtures/GenEndToEnd.t.sol # Solidity generator for the parity_e2e vectors
+  tests/sim.rs               # simulator coverage
+  fixtures/GenEndToEnd.t.sol # Solidity generator for the signing vectors
+  fixtures/GenSim.t.sol      # Solidity generator for the tick-price vectors
 bench-js/                    # ethers v6 baseline
 ```
