@@ -8,6 +8,9 @@ Authoritative test vectors for `nocturne-offers`, generated from the Midnight co
   into `../tests/parity_e2e.rs`.
 - `GenSim.t.sol` — prints `TickLib.tickToPrice` for a spread of ticks; the values are baked into
   `../tests/sim_parity.rs`.
+- `GenTake.t.sol` — extends the contracts' `BaseTest` and runs a **real** `Midnight.take`, reading
+  back the resulting amounts and position deltas; baked into `../tests/sim_take_parity.rs`. Because
+  it imports `BaseTest.sol`, drop it in the contracts' `test/` dir to regenerate (as above).
 
 This is intentionally **not** part of `cargo test`: the Rust test carries the constants so the
 crate builds and tests standalone (same pattern as the typehash constants in `../tests/parity.rs`).

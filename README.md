@@ -196,7 +196,10 @@ Everything is checked against the contract (`cargo test`):
    the real `EcrecoverRatifier.isRatified` and confirms it *accepts* the signature.
 3. **Tick prices** — `tests/sim_parity.rs`: `tick_to_price` matches `TickLib.tickToPrice`
    (vectors from `fixtures/GenSim.t.sol`) across the tick range.
-4. **ethers** — the bench and the ethers baseline print the same root to the byte.
+4. **Take math** — `tests/sim_take_parity.rs`: `settlement_fee` / `take_amounts` / `simulate_take`
+   reproduce the amounts and position deltas of a **real** `Midnight.take`, run end-to-end through
+   the full contract by `fixtures/GenTake.t.sol`.
+5. **ethers** — the bench and the ethers baseline print the same root to the byte.
 
 ## Run it
 
@@ -219,10 +222,12 @@ crates/nocturne-offers/
   tests/parity.rs            # typehash parity vs HashLib.sol
   tests/parity_e2e.rs        # end-to-end signing parity vs the real EcrecoverRatifier
   tests/sim_parity.rs        # tick_to_price parity vs TickLib
+  tests/sim_take_parity.rs   # take math parity vs a real Midnight.take
   tests/builder.rs           # builder coverage
   tests/validate.rs          # validate_offer coverage
   tests/sim.rs               # simulator coverage
   fixtures/GenEndToEnd.t.sol # Solidity generator for the signing vectors
   fixtures/GenSim.t.sol      # Solidity generator for the tick-price vectors
+  fixtures/GenTake.t.sol     # Solidity generator (real take) for the take-math vectors
 bench-js/                    # ethers v6 baseline
 ```
