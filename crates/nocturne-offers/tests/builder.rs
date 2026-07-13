@@ -129,7 +129,7 @@ fn built_offer_hashes_and_signs() {
         .max_units(1_000_000)
         .build();
 
-    let tree = OfferTree::build(vec![hash_offer(&offer)]);
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
     let chain_id = word_from_u64(1);
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &RATIFIER);
     let sig = sign_digest(&sk, &digest);

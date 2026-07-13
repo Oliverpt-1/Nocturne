@@ -19,6 +19,23 @@ pub use validate::*;
 mod sim;
 pub use sim::*;
 
+mod decode;
+pub use decode::*;
+
+mod codec;
+pub use codec::*;
+
+mod signer;
+pub use signer::*;
+
+/// Errors from constructing a Merkle tree over offer leaves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TreeError {
+    /// The leaf set is empty or not a power of two.
+    #[error("leaf count must be a nonzero power of two, got {0}")]
+    NotPowerOfTwo(usize),
+}
+
 pub type Word = [u8; 32];
 pub type Address = [u8; 20];
 
@@ -56,7 +73,7 @@ fn bool_word(b: bool) -> Word {
     w
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CollateralParams {
     pub token: Address,
     pub lltv: Word,
@@ -64,7 +81,7 @@ pub struct CollateralParams {
     pub oracle: Address,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Market {
     pub chain_id: Word,
     pub midnight: Address,
@@ -76,7 +93,7 @@ pub struct Market {
     pub liquidator_gate: Address,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Offer {
     pub market: Market,
     pub buy: bool,
@@ -187,14 +204,18 @@ pub fn hash_node(left: &Word, right: &Word) -> Word {
 }
 
 /// A perfect binary Merkle tree over offer leaves. `height` = log2(leaves.len()).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OfferTree {
     /// levels[0] = leaves, levels[height] = [root]
     pub levels: Vec<Vec<Word>>,
 }
 
 impl OfferTree {
-    pub fn build(leaves: Vec<Word>) -> Self {
-        assert!(leaves.len().is_power_of_two(), "leaf count must be a power of two");
+    /// Build a perfect binary tree over `leaves`. Errors unless the count is a nonzero power of two.
+    pub fn build(leaves: Vec<Word>) -> Result<Self, TreeError> {
+        if leaves.is_empty() || !leaves.len().is_power_of_two() {
+            return Err(TreeError::NotPowerOfTwo(leaves.len()));
+        }
         let mut levels = vec![leaves];
         while levels.last().unwrap().len() > 1 {
             let prev = levels.last().unwrap();
@@ -204,7 +225,7 @@ impl OfferTree {
                 .collect();
             levels.push(next);
         }
-        OfferTree { levels }
+        Ok(OfferTree { levels })
     }
 
     pub fn height(&self) -> usize {
@@ -258,6 +279,7 @@ pub fn tree_digest(root: Word, height: usize, chain_id: Word, ratifier: &Address
     keccak(&buf)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Sig {
     pub r: Word,
     pub s: Word,
@@ -392,7 +414,7 @@ mod tests {
 
         let offers: Vec<Offer> = (0..4).map(|i| tiny_offer(maker, i)).collect();
         let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
-        let tree = OfferTree::build(leaves);
+        let tree = OfferTree::build(leaves).unwrap();
         let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
         let sig = sign_digest(&sk, &digest);
 
@@ -413,7 +435,7 @@ mod tests {
         let chain_id = word_u64(1);
 
         let offers: Vec<Offer> = (0..2).map(|i| tiny_offer(maker, i)).collect();
-        let tree = OfferTree::build(offers.iter().map(hash_offer).collect());
+        let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
         let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
         let sig = sign_digest(&sk, &digest);
 
@@ -429,7 +451,7 @@ mod tests {
         let chain_id = word_u64(1);
 
         let offers: Vec<Offer> = (0..4).map(|i| tiny_offer(maker, i)).collect();
-        let tree = OfferTree::build(offers.iter().map(hash_offer).collect());
+        let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
         let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
         let sig = sign_digest(&sk, &digest);
 

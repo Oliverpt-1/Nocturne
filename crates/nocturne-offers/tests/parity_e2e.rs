@@ -88,7 +88,7 @@ fn make_offer(i: u64) -> Offer {
 fn leaf_root_digest_match_the_ratifier() {
     let offers: Vec<Offer> = (0..4).map(make_offer).collect();
     let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
-    let tree = OfferTree::build(leaves.clone());
+    let tree = OfferTree::build(leaves.clone()).unwrap();
 
     assert_eq!(leaves[0], hx32(EXPECT_LEAF0), "leaf0 hash mismatch vs HashLib.hashOffer");
     assert_eq!(tree.root(), hx32(EXPECT_ROOT), "root mismatch vs HashLib tree");
@@ -100,7 +100,7 @@ fn leaf_root_digest_match_the_ratifier() {
 #[test]
 fn recovered_signer_is_the_maker() {
     let offers: Vec<Offer> = (0..4).map(make_offer).collect();
-    let tree = OfferTree::build(offers.iter().map(hash_offer).collect());
+    let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), u256(CHAIN_ID), &hx20(RATIFIER));
 
     let sig = Sig { r: hx32(SIG_R), s: hx32(SIG_S), v: SIG_V };
@@ -111,7 +111,7 @@ fn recovered_signer_is_the_maker() {
 fn contract_accepted_signature_passes_verify() {
     // This is the exact `(sig, root, leafIndex, proof)` the on-chain `isRatified` accepted.
     let offers: Vec<Offer> = (0..4).map(make_offer).collect();
-    let tree = OfferTree::build(offers.iter().map(hash_offer).collect());
+    let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
     let sig = Sig { r: hx32(SIG_R), s: hx32(SIG_S), v: SIG_V };
 
     assert!(
