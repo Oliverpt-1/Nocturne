@@ -2,145 +2,166 @@
 
 Off-chain Rust tooling for [Morpho Midnight](https://github.com/morpho-org/midnight).
 
-First component: `nocturne-offers` — a byte-for-byte mirror of Midnight's EIP-712
-offer-tree signing (`HashLib.sol` + `EcrecoverRatifier`), for market makers who
-re-price and re-sign large offer grids on every market move. It covers the full
-maker lifecycle: **build → hash → tree/proofs → sign → recover/verify**, plus
-pre-flight **policy validation** (`validate_offer`) so a malformed offer is caught
-locally instead of reverting when a taker lifts it.
+`nocturne-offers` is a byte-for-byte mirror of Midnight's EIP-712 offer-tree signing
+(`HashLib.sol` + `EcrecoverRatifier`): hash offers, build the Merkle tree and proofs, sign
+the root, recover/verify signatures, and validate offers against the `take` rules — all
+locally, in native code, across cores.
 
-## Why this exists
-
-Midnight uses Seaport-style bulk signing: a maker builds a Merkle tree of offers and
-signs **one** root; takers lift individual offers with a Merkle proof. The ECDSA
-signature is O(1) per tree — the cost that scales is the **keccak hashing** of every
-nested `Offer` leaf, rebuilt every time the maker re-quotes. That's a pure-CPU,
-embarrassingly parallel workload sitting on the competitive critical path (stale-quote
-risk / adverse selection). It's exactly where native + multicore beats a JS signer.
-
-## Correctness (parity)
-
-Speed means nothing if the hashes don't match the contract. Parity is proven three ways:
-
-1. **Rust ↔ Solidity typehashes** — `tests/parity.rs` asserts every computed typehash equals
-   the hardcoded constant in `HashLib.sol` (`COLLATERAL_PARAMS`, `MARKET`, `OFFER`, and all
-   21 `offerTreeTypeHash` heights).
-2. **Rust ↔ the real ratifier (end-to-end)** — `tests/parity_e2e.rs` reconstructs a concrete
-   4-offer tree and asserts the Rust leaf, root, **signed digest**, and **signer recovery** all
-   equal what the on-chain contract produces. The expected values come from
-   `fixtures/GenEndToEnd.t.sol`, which drives the actual `EcrecoverRatifier.isRatified` and
-   confirms it *accepts* the signature — so this proves the whole digest assembly
-   (domain separator + `offerTreeTypeHash` + `0x1901`), not just the typehashes.
-3. **Rust ↔ ethers** — the Rust bench and the ethers baseline both print the root of the same
-   4-offer tree and are identical to the byte:
-   `0x53fe807622c3257be67f3fc456a3585aabc545a739bc99e464ccc52961a68cb8`.
-
-`cargo test` → all green. A signature produced here passes `EcrecoverRatifier.isRatified`
-on-chain — proven directly by (2), where the real contract accepts it.
-
-## API (maker lifecycle)
+```toml
+[dependencies]
+nocturne-offers = { path = "crates/nocturne-offers" }
+```
 
 ```rust
 use nocturne_offers::*;
-
-// build leaves -> tree -> proofs -> digest -> sign
-let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
-let tree = OfferTree::build(leaves);
-let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
-let sig = sign_digest(&sk, &digest);
-
-// recover / verify — the off-chain mirror of EcrecoverRatifier.isRatified
-let maker = signer_address(&sk);
-assert!(verify(&offers[0], &tree.root(), 0, &tree.proof(0), &sig, chain_id, &ratifier, &maker));
-
-// pre-flight policy validation — will `take` accept this offer?
-let errors = validate_offer(&offers[0], &ValidateCtx {
-    chain_id: Some(1),
-    now: Some(now_ts),
-    market: Some(MarketSnapshot { tick_spacing: 4, loss_factor_maxed: false, continuous_fee: 100 }),
-    ..Default::default()
-});
-assert!(errors.is_empty());
 ```
 
-`validate_offer` mirrors the offer-relevant revert conditions in `Midnight.take` and returns
-**every** problem found, so a maker can scrub a whole grid before signing. Checks whose input is
-absent from `ValidateCtx` are skipped, so it degrades cleanly from "stateless structural check" to
-"full check against a live market snapshot." Consumption caps (which depend on take size) are
-exposed separately via `active_cap` / `consumption_headroom` / `can_consume`.
+Types: `Word = [u8; 32]`, `Address = [u8; 20]`. `uint256` fields (`chain_id`, `tick`,
+`maturity`, …) are `Word` (big-endian). The tools below assume `offers: Vec<Offer>`,
+`sk: SigningKey`, `chain_id: Word`, and `ratifier: Address` are in scope.
 
-## Benchmark
+---
 
-### What is measured
+## Offer hashing
 
-One **full re-quote cycle** — the exact work a maker repeats every time the market moves:
+EIP-712 struct hashes for `Offer` / `Market` / `CollateralParams`. `hash_offer` is the Merkle
+leaf. Typehash helpers (`offer_typehash()`, `market_typehash()`, …) compute the on-chain
+`HashLib` constants from the type strings.
 
-1. keccak-hash all `N` `Offer` leaves (EIP-712 struct hashes),
-2. build the Merkle tree,
-3. generate a Merkle proof for every leaf (takers need these to lift an offer),
-4. sign the tree root once (secp256k1).
+```rust
+let leaf: Word = hash_offer(&offers[0]);           // == HashLib.hashOffer(offer)
+let market_hash: Word = hash_market(&offers[0].market);
+```
 
-Both implementations do identical work and produce the identical root (see parity above),
-so this is a like-for-like comparison. Timings are the best of 20 reps after warmup.
+## Offer tree (Merkle)
 
-- **Baseline — ethers v6** (`TypedDataEncoder`), single-threaded. This is how makers sign
-  Midnight offers today.
-- **Nocturne (this crate)**, reported single-threaded *and* parallel (rayon, across cores).
+Perfect binary tree over offer leaves, with per-leaf proofs in `HashLib.isLeaf` order. Takers
+need a leaf's proof to lift that offer.
 
-### Results
+```rust
+let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
+let tree = OfferTree::build(leaves);               // leaf count must be a power of two
 
-Machine: Apple M5 Pro, 18 cores. Reproduce with the commands below.
+let root = tree.root();
+let height = tree.height();
+let proof = tree.proof(0);                          // proof for leaf 0
 
-| Offers (N) | ethers v6 (today) | Nocturne — 1 core | Nocturne — parallel |
-|-----------:|------------------:|------------------:|--------------------:|
-| 1,024      | 302.5 ms          | 4.74 ms           | 1.02 ms             |
-| 4,096      | 1.22 s            | 18.9 ms           | 3.09 ms             |
-| 16,384     | 4.90 s            | 75.5 ms           | 9.46 ms             |
+assert!(verify_leaf(&root, &hash_offer(&offers[0]), 0, &proof));
+```
 
-**Speedup vs ethers** (higher = faster):
+## Signing
 
-| Offers (N) | Nocturne 1 core | Nocturne parallel |
-|-----------:|----------------:|------------------:|
-| 1,024      | 64×             | 297×              |
-| 4,096      | 65×             | 396×              |
-| 16,384     | 65×             | **517×**          |
+Builds the digest the maker signs — one signature covers the whole tree — exactly as
+`EcrecoverRatifier` reassembles it (`domain separator` + `offerTreeTypeHash` + `0x1901`).
 
-Per-offer cost: ethers ≈ **299 µs**, Nocturne 1-core ≈ **4.6 µs**, Nocturne parallel ≈ **0.58 µs**.
+```rust
+let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
+let sig: Sig = sign_digest(&sk, &digest);           // { r, s, v }
+let maker: Address = signer_address(&sk);           // the offer.maker to embed
+```
 
-### How to read this
+## Verify / recover
 
-Refreshing a **16,384-offer** quote grid takes **~4.9 s** with ethers but **~9.5 ms** with
-Nocturne. At ~5 s per refresh a maker is signing into prices that have already moved
-(adverse selection); at ~10 ms they can re-quote the entire book faster than a block is
-produced. That gap is the whole point of the crate.
+Off-chain mirror of `EcrecoverRatifier.isRatified`. `recover` returns the signer (`None` on a
+malformed signature). `verify` re-hashes the leaf, checks the proof, rebuilds the digest,
+recovers, and confirms the maker — i.e. confirms a `take` carrying `(sig, root, index, proof)`
+will pass the ratifier.
 
-### Honest caveats
+```rust
+assert_eq!(recover(&digest, &sig), Some(maker));
 
-- ethers' `TypedDataEncoder.hashStruct` is the *standard* idiom but not the fastest
-  possible JS (it re-resolves types on every call). A hand-optimized JS signer would
-  narrow the single-core gap. The **parallel** advantage is structural, though — Node
-  can't easily fan keccak across cores, and that's where the ~500× lives.
-- ECDSA signing is one call per tree, so it's noise in these numbers; the win is keccak
-  hashing throughput.
+assert!(verify(
+    &offers[0], &tree.root(), 0, &tree.proof(0),
+    &sig, chain_id, &ratifier, &maker,
+));
+```
+
+## Policy validation
+
+`validate_offer` mirrors the offer-relevant revert conditions in `Midnight.take` (and the market
+checks in `touchMarket`) and returns **every** problem found, so a whole grid can be scrubbed in
+one pass. Any `ValidateCtx` field left `None` skips its checks, so it degrades from a stateless
+structural check to a full check against a live market snapshot.
+
+```rust
+let errors: Vec<OfferError> = validate_offer(&offers[0], &ValidateCtx {
+    chain_id: Some(1),
+    midnight: Some(midnight_addr),
+    now: Some(now_ts),
+    market: Some(MarketSnapshot {
+        tick_spacing: DEFAULT_TICK_SPACING,
+        loss_factor_maxed: false,
+        continuous_fee: 100,
+    }),
+});
+assert!(errors.is_empty());               // or: is_valid(&offers[0], &ctx)
+```
+
+Consumption caps depend on take size, so they're separate helpers:
+
+```rust
+let cap = active_cap(&offers[0]);                              // Cap::Units | Cap::Assets, None if caps invalid
+let left = consumption_headroom(&offers[0], consumed_so_far);  // remaining in the group
+let ok = can_consume(&offers[0], consumed_so_far, amount);     // does `amount` stay within the cap?
+```
+
+`OfferError` variants map to `IMidnight` errors: `InvalidOfferCaps`, `TickOutOfRange`,
+`StartAfterExpiry`, `UnusedReceiverMustBeZero`, `NoCollateralParams`, `TooManyCollateralParams`,
+`CollateralParamsNotSorted`, `InvalidChainId`, `InvalidMidnight`, `MaturityTooFar`,
+`OfferNotStarted`, `OfferExpired`, `TickNotAccessible`, `MarketLossFactorMaxedOut`,
+`ContinuousFeeAboveOfferCap`.
+
+## Benchmark (`bin/bench`)
+
+Times one full re-quote cycle — hash `N` leaves → build tree → all proofs → sign root —
+single-threaded and parallel (rayon), and cross-checks the root against the ethers baseline.
+
+```sh
+cargo run --release --bin bench
+```
+
+Apple M5 Pro, 18 cores, best of 20 reps:
+
+| Offers (N) | ethers v6 | Nocturne — 1 core | Nocturne — parallel | speedup |
+|-----------:|----------:|------------------:|--------------------:|--------:|
+| 1,024      | 302.5 ms  | 4.74 ms           | 1.02 ms             | 297×    |
+| 4,096      | 1.22 s    | 18.9 ms           | 3.09 ms             | 396×    |
+| 16,384     | 4.90 s    | 75.5 ms           | 9.46 ms             | 517×    |
+
+The signature is O(1) per tree; the cost that scales is keccak hashing every leaf on each
+re-quote, which is what the parallel path fans across cores.
+
+---
+
+## Correctness (parity)
+
+Every hash is checked against the contract three ways (`cargo test`):
+
+1. **Typehashes** — `tests/parity.rs`: each computed typehash equals the `HashLib.sol` constant
+   (`COLLATERAL_PARAMS`, `MARKET`, `OFFER`, all 21 `offerTreeTypeHash` heights).
+2. **End-to-end** — `tests/parity_e2e.rs`: a 4-offer tree's leaf / root / digest / recovered
+   signer all match the on-chain values from `fixtures/GenEndToEnd.t.sol`, which drives the real
+   `EcrecoverRatifier.isRatified` and confirms it *accepts* the signature.
+3. **ethers** — the bench and the ethers baseline print the same root to the byte.
 
 ## Run it
 
 ```sh
-cargo test -q                              # parity (typehash + end-to-end), verify, validation
+cargo test -q                              # parity + verify + validation
 cargo run --release --bin bench            # Nocturne numbers + crosscheck root
-cd bench-js && npm i && node bench.js      # ethers baseline + crosscheck root (same root)
+cd bench-js && npm i && node bench.js      # ethers baseline (same root)
 ```
 
 ## Layout
 
 ```
-crates/nocturne-offers/   # EIP-712 offer hashing, Merkle tree/proofs, signing, verify, validation
-  src/lib.rs              # hashing + tree + digest + sign/recover/verify (mirror of HashLib + ratifier)
-  src/validate.rs         # validate_offer — pre-flight policy checks vs Midnight.take
-  src/bin/bench.rs        # Nocturne benchmark
-  tests/parity.rs         # typehash parity vs HashLib.sol
-  tests/parity_e2e.rs     # end-to-end leaf/root/digest/recovery parity vs the real EcrecoverRatifier
-  tests/validate.rs       # validate_offer coverage
-  fixtures/GenEndToEnd.t.sol  # Solidity generator for the parity_e2e vectors (not part of cargo test)
-bench-js/                 # ethers v6 baseline (how it's done today)
+crates/nocturne-offers/
+  src/lib.rs                 # hashing + tree + digest + sign/recover/verify
+  src/validate.rs            # validate_offer + consumption helpers
+  src/bin/bench.rs           # benchmark
+  tests/parity.rs            # typehash parity vs HashLib.sol
+  tests/parity_e2e.rs        # end-to-end parity vs the real EcrecoverRatifier
+  tests/validate.rs          # validate_offer coverage
+  fixtures/GenEndToEnd.t.sol # Solidity generator for the parity_e2e vectors
+bench-js/                    # ethers v6 baseline
 ```
