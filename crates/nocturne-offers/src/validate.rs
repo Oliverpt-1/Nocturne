@@ -58,6 +58,16 @@ pub enum OfferError {
     MarketLossFactorMaxedOut,
     /// The market's continuous fee exceeds the offer's `continuousFeeCap`.
     ContinuousFeeAboveOfferCap,
+    /// Group consumption would exceed `maxUnits`.
+    ConsumedUnits,
+    /// Group consumption would exceed `maxAssets`.
+    ConsumedAssets,
+    /// Taker equals maker.
+    SelfTake,
+    /// A take after maturity would increase the seller's debt.
+    CannotIncreaseDebtPostMaturity,
+    /// A `reduceOnly` offer would increase the maker's credit (buy) or debt (sell).
+    MakerCreditOrDebtIncreased,
 }
 
 /// A snapshot of live market state, if the maker has one to validate against.
