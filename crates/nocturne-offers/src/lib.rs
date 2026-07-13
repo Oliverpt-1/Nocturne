@@ -10,6 +10,9 @@ use tiny_keccak::{Hasher, Keccak};
 mod convert;
 pub use convert::*;
 
+mod builder;
+pub use builder::*;
+
 mod validate;
 pub use validate::*;
 
@@ -50,7 +53,7 @@ fn bool_word(b: bool) -> Word {
     w
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CollateralParams {
     pub token: Address,
     pub lltv: Word,
@@ -58,7 +61,7 @@ pub struct CollateralParams {
     pub oracle: Address,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Market {
     pub chain_id: Word,
     pub midnight: Address,
@@ -70,7 +73,7 @@ pub struct Market {
     pub liquidator_gate: Address,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Offer {
     pub market: Market,
     pub buy: bool,
