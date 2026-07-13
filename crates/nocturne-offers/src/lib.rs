@@ -7,6 +7,9 @@
 use k256::ecdsa::{RecoveryId, Signature as EcdsaSig, SigningKey, VerifyingKey};
 use tiny_keccak::{Hasher, Keccak};
 
+mod validate;
+pub use validate::*;
+
 pub type Word = [u8; 32];
 pub type Address = [u8; 20];
 
