@@ -14,7 +14,7 @@
 //! runs the stateless subset. Consumption headroom (which depends on take amounts) is exposed
 //! separately via [`consumption_headroom`] / [`can_consume`].
 
-use crate::{Address, Offer, Word};
+use crate::{word_from_u128 as w128, word_to_u128, Address, Offer};
 
 /// Highest tick `TickLib.tickToPrice` accepts (`MAX_TICK` in TickLib.sol).
 pub const MAX_TICK: u64 = 6744;
@@ -82,23 +82,6 @@ pub struct ValidateCtx {
     pub now: Option<u64>,
     /// Live market snapshot, for tick spacing / loss factor / fee checks.
     pub market: Option<MarketSnapshot>,
-}
-
-/// A 32-byte word holding `x` in its low 16 bytes (an EIP-712 `uint256` from a `u128`).
-fn w128(x: u128) -> Word {
-    let mut w = [0u8; 32];
-    w[16..].copy_from_slice(&x.to_be_bytes());
-    w
-}
-
-/// `Some(v)` if the word fits in a `u128` (top 16 bytes zero), else `None`.
-fn word_to_u128(w: &Word) -> Option<u128> {
-    if w[..16].iter().any(|&b| b != 0) {
-        return None;
-    }
-    let mut b = [0u8; 16];
-    b.copy_from_slice(&w[16..]);
-    Some(u128::from_be_bytes(b))
 }
 
 /// Which cap governs the offer, and its value.
