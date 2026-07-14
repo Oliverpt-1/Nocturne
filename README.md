@@ -59,6 +59,16 @@ let kms = ExternalSigner::new(kms_address, |d| Ok(kms_sign_der(d)));
 let sig = kms.sign_digest(&digest)?;
 ```
 
+## Authorize a hot key
+
+Delegate signing to a hot key (or authorize a ratifier) without your cold account — the signed
+`Authorization` that `EcrecoverAuthorizer.setIsAuthorized` consumes.
+
+```rust
+let auth = Authorization::new(authorizer, hot_key_addr, true, nonce, deadline);
+let sig = sign_authorization(&cold_sk, &auth, chain_id, &authorizer_contract);
+```
+
 ## Verify · recover
 
 Off-chain mirror of `EcrecoverRatifier.isRatified`.
@@ -90,6 +100,13 @@ let price = tick_to_price(8)?;                          // WAD
 let amounts = take_amounts(&offers[0], U256::from(1_000u64), now_ts, cbps)?;
 let out = simulate_take(&offers[0], U256::from(1_000u64), &ctx)?;
 // out.buyer_assets / seller_assets / *_credit_increase / new_consumed / reverts
+```
+
+Size in notional (assets) instead of units, or find remaining capacity:
+
+```rust
+let units = buyer_assets_to_units(&offers[0], U256::from(500_000u64), now_ts, cbps)?;
+let left  = consumable_units(&offers[0], consumed, now_ts, cbps)?;
 ```
 
 ## Decode on-chain data
