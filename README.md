@@ -4,8 +4,9 @@ Off-chain Rust tooling for [Morpho Midnight](https://github.com/morpho-org/midni
 
 `nocturne-offers` is a byte-for-byte mirror of Midnight's EIP-712 offer-tree signing
 (`HashLib.sol` + `EcrecoverRatifier`): build offers, hash them, build the Merkle tree and
-proofs, sign the root, recover/verify signatures, validate offers against the `take` rules,
-and simulate a take locally — all in native code, across cores.
+proofs, sign the root (local key or KMS/HSM), recover/verify signatures, validate offers
+against the `take` rules, simulate a take locally, decode on-chain offers/state, and encode
+the `take` / `cancelRoot` calldata — all in native code, across cores.
 
 ```toml
 [dependencies]
@@ -81,6 +82,19 @@ Builds the digest the maker signs — one signature covers the whole tree — ex
 let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
 let sig: Sig = sign_digest(&sk, &digest);           // { r, s, v }
 let maker: Address = signer_address(&sk);           // the offer.maker to embed
+```
+
+For institutional keys, sign through the `Signer` trait instead of a raw key — `LocalSigner`
+(in-process) or a KMS/HSM. `ExternalSigner` wraps any backend that returns a DER signature; the
+crate normalizes `s` and recovers the on-chain `v` for you.
+
+```rust
+let signer = LocalSigner::from_bytes(&key_bytes)?;
+let sig = signer.sign_digest(&digest)?;             // Result<Sig, SignerError>
+
+// KMS/HSM: supply a closure that DER-signs the digest (e.g. AWS kms:Sign, DIGEST/ECDSA_SHA_256)
+let kms = ExternalSigner::new(kms_address, |d| Ok(kms_sign_der(d)));
+let sig = kms.sign_digest(&digest)?;
 ```
 
 ## Verify / recover
@@ -163,6 +177,31 @@ Scope: the deterministic economic outcome and the take-time reverts. Out of scop
 chain reads / external calls): gate checks, borrower health, ratifier/authorization, and position
 slashing + fee accrual — positions passed in are assumed already updated.
 
+## Decoding on-chain data
+
+Turn raw bytes into typed Rust — the inverse of the wire encoding — so `validate`/`simulate` can
+run off live state instead of hand-fed inputs.
+
+```rust
+let offer = decode_offer(&abi_bytes)?;               // inverse of Solidity abi.encode(Offer)
+
+// decode raw eth_call return blobs, then project into the sim/validate inputs
+let market = decode_market_state(&market_state_ret)?;   // .to_sim_market() / .to_market_snapshot()
+let pos    = decode_position(&position_ret)?;            // .to_sim_position()
+let used   = decode_consumed(&consumed_ret)?;            // u128
+```
+
+## Encoding calldata
+
+Build the transactions a taker/maker submits. Selectors and byte layout are parity-checked
+against the contract.
+
+```rust
+let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
+let take_call = encode_take_calldata(&offers[0], &ratifier_data, units, &taker, &receiver, &cb, &cb_data);
+let cancel_call = encode_cancel_root_calldata(&maker, &tree.root());   // EcrecoverRatifier.cancelRoot
+```
+
 ## Benchmark (`bin/bench`)
 
 Times one full re-quote cycle — hash `N` leaves → build tree → all proofs → sign root —
@@ -199,7 +238,13 @@ Everything is checked against the contract (`cargo test`):
 4. **Take math** — `tests/sim_take_parity.rs`: `settlement_fee` / `take_amounts` / `simulate_take`
    reproduce the amounts and position deltas of a **real** `Midnight.take`, run end-to-end through
    the full contract by `fixtures/GenTake.t.sol`.
-5. **ethers** — the bench and the ethers baseline print the same root to the byte.
+5. **ABI codec** — `tests/codec.rs`: `take` / `cancelRoot` calldata and `ratifierData` are byte-equal
+   to Solidity `abi.encodeCall` (`fixtures/GenCodec.t.sol`).
+6. **Decoding** — `tests/decode.rs`: `decode_offer` round-trips real `abi.encode(offer)` bytes
+   (`fixtures/GenDecode.t.sol`).
+7. **Differential fuzz** — `tests/fuzz.rs`: 32 random offers/ticks match `HashLib`/`TickLib`
+   (`fixtures/GenFuzz.t.sol`), plus proptest invariants (Merkle, sign→recover→verify, never-panic).
+8. **ethers** — the bench and the ethers baseline print the same root to the byte.
 
 ## Run it
 
@@ -218,16 +263,11 @@ crates/nocturne-offers/
   src/builder.rs             # OfferBuilder / MarketBuilder
   src/validate.rs            # validate_offer + consumption helpers
   src/sim.rs                 # tick_to_price, settlement_fee, take_amounts, simulate_take
+  src/decode.rs              # decode offers + market/position/consumed state
+  src/codec.rs               # encode take / cancelRoot calldata + ratifierData
+  src/signer.rs              # Signer trait: LocalSigner + KMS/HSM (ExternalSigner)
   src/bin/bench.rs           # benchmark
-  tests/parity.rs            # typehash parity vs HashLib.sol
-  tests/parity_e2e.rs        # end-to-end signing parity vs the real EcrecoverRatifier
-  tests/sim_parity.rs        # tick_to_price parity vs TickLib
-  tests/sim_take_parity.rs   # take math parity vs a real Midnight.take
-  tests/builder.rs           # builder coverage
-  tests/validate.rs          # validate_offer coverage
-  tests/sim.rs               # simulator coverage
-  fixtures/GenEndToEnd.t.sol # Solidity generator for the signing vectors
-  fixtures/GenSim.t.sol      # Solidity generator for the tick-price vectors
-  fixtures/GenTake.t.sol     # Solidity generator (real take) for the take-math vectors
+  tests/                     # parity, sim, builder, validate, decode, codec, signer, fuzz
+  fixtures/Gen*.t.sol        # Solidity generators for the parity/differential vectors
 bench-js/                    # ethers v6 baseline
 ```
