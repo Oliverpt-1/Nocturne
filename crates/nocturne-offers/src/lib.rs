@@ -28,6 +28,12 @@ pub use codec::*;
 mod signer;
 pub use signer::*;
 
+mod authorize;
+pub use authorize::*;
+
+mod sizing;
+pub use sizing::*;
+
 /// Errors from constructing a Merkle tree over offer leaves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TreeError {
