@@ -63,7 +63,13 @@ contract DeployE2E is Script {
         midnight.setTickSpacingSetter(ACCOUNT0);
         midnight.enableLiquidationCursor(CURSOR);
         midnight.enableLltv(LLTV);
-        // fees intentionally left at zero (no setDefault* calls)
+        // non-zero settlement-fee curve (on-chain max per index) so the fee-bearing take math and
+        // sizing are exercised live; continuous fee left at zero.
+        uint256 CBP = 1e12;
+        uint16[7] memory cbps = [uint16(14), 14, 98, 417, 1250, 2500, 5000];
+        for (uint256 i = 0; i <= 6; i++) {
+            midnight.setDefaultSettlementFee(address(loan), i, uint256(cbps[i]) * CBP);
+        }
 
         CollateralParams[] memory cp = new CollateralParams[](1);
         cp[0] = CollateralParams({token: address(collat), lltv: LLTV, liquidationCursor: CURSOR, oracle: address(oracle)});
@@ -80,7 +86,7 @@ contract DeployE2E is Script {
 
         // fund + collateralize the taker (seller/borrower); create the market via supplyCollateral
         uint256 collAmt = (((UNITS * WAD + LLTV - 1) / LLTV) * ORACLE_PRICE_SCALE + ORACLE_PRICE_SCALE - 1)
-            / ORACLE_PRICE_SCALE * 2; // ~2x the healthy minimum
+            / ORACLE_PRICE_SCALE * 4; // ~4x the healthy minimum (covers multiple takes)
         collat.mint(ACCOUNT0, collAmt);
         collat.approve(address(midnight), collAmt);
         midnight.supplyCollateral(market, 0, collAmt, ACCOUNT0);

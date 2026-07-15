@@ -36,7 +36,9 @@ echo "== 2. run the Rust tools (build/sign/authorize/encode/simulate) =="
 GEN=$(cd "$CRATE" && cargo run --quiet --example e2e -- gen)
 g() { grep -E "^$1 " <<<"$GEN" | awk '{print $2}'; }
 MAKER=$(g MAKER); TAKE=$(g TAKE_CALLDATA); CANCEL=$(g CANCEL_CALLDATA)
+TAKE2=$(g TAKE2_CALLDATA); BAD_TAKE=$(g BAD_TAKE_CALLDATA)
 ok "tools produced offer, signature, and calldata"
+eq "validate flagged bad tick (rust)" "$(g VALIDATE_FLAGGED_TICK)" "true"
 
 echo "== 3. hot-key authorization (sign_authorization -> real EcrecoverAuthorizer) =="
 AUTH_CALLDATA=$(cast calldata "setIsAuthorized((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32))" \
@@ -55,7 +57,20 @@ eq "maker credit"  "$(cast call "$MIDNIGHT" 'credit(bytes32,address)(uint128)' "
 eq "taker debt"    "$(cast call "$MIDNIGHT" 'debt(bytes32,address)(uint128)' "$MARKET_ID" "$ACCOUNT0" --rpc-url "$RPC")"    "$(grep -E '^PRED_SELLER_DEBT_INCREASE' <<<"$GEN" | awk '{print $2}')"
 eq "group consumed" "$(cast call "$MIDNIGHT" 'consumed(address,bytes32)(uint128)' "$MAKER" "$GROUP" --rpc-url "$RPC")"      "$(grep -E '^PRED_NEW_CONSUMED' <<<"$GEN" | awk '{print $2}')"
 LOAN_AFTER=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
-eq "seller received assets" "$((LOAN_AFTER - LOAN_BEFORE))" "$(grep -E '^PRED_SELLER_ASSETS' <<<"$GEN" | awk '{print $2}')"
+eq "seller received assets (with fee)" "$((LOAN_AFTER - LOAN_BEFORE))" "$(grep -E '^PRED_SELLER_ASSETS ' <<<"$GEN" | awk '{print $2}')"
+
+echo "== 5b. sizing: take sized to a target asset amount (seller_assets_to_units) =="
+SZ_BEFORE=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+cast send "$MIDNIGHT" "$TAKE2" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+SZ_AFTER=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+eq "sized take yielded predicted assets" "$((SZ_AFTER - SZ_BEFORE))" "$(grep -E '^PRED_SELLER_ASSETS2 ' <<<"$GEN" | awk '{print $2}')"
+
+echo "== 5c. validate: a bad-tick offer must revert on-chain (TickNotAccessible) =="
+if cast call "$MIDNIGHT" "$BAD_TAKE" --from "$ACCOUNT0" --rpc-url "$RPC" >/dev/null 2>&1; then
+  fail "bad-tick take should have reverted"
+else
+  ok "bad-tick take reverted on-chain (as validate_offer predicted)"
+fi
 
 echo "== 6. decode real on-chain state with the decoder tool =="
 MS=$(cast call "$MIDNIGHT" 'marketState(bytes32)' "$MARKET_ID" --rpc-url "$RPC")
@@ -64,7 +79,8 @@ eq "decoded tick_spacing"   "$(grep TICK_SPACING <<<"$DM" | awk '{print $2}')" "
 eq "decoded continuous_fee" "$(grep CONTINUOUS_FEE <<<"$DM" | awk '{print $2}')" "0"
 POS=$(cast call "$MIDNIGHT" 'position(bytes32,address)' "$MARKET_ID" "$MAKER" --rpc-url "$RPC")
 DP=$(cd "$CRATE" && cargo run --quiet --example e2e -- decode-position "$POS")
-eq "decoded maker credit" "$(grep CREDIT <<<"$DP" | awk '{print $2}')" "$(grep -E '^PRED_BUYER_CREDIT_INCREASE' <<<"$GEN" | awk '{print $2}')"
+CREDIT_ONCHAIN=$(cast call "$MIDNIGHT" 'credit(bytes32,address)(uint128)' "$MARKET_ID" "$MAKER" --rpc-url "$RPC" | awk '{print $1}')
+eq "decoded maker credit == getter" "$(grep CREDIT <<<"$DP" | awk '{print $2}')" "$CREDIT_ONCHAIN"
 
 echo "== 7. cancel the root (encode_cancel_root_calldata) then a re-take must revert =="
 cast send "$RATIFIER" "$CANCEL" --rpc-url "$RPC" --private-key "$PK1" >/dev/null

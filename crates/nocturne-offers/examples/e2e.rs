@@ -21,6 +21,9 @@ const UNITS: u128 = 1_000_000;
 const GROUP: u64 = 1;
 const LLTV: u64 = 770_000_000_000_000_000;
 const CURSOR: u64 = 300_000_000_000_000_000;
+// on-chain settlement-fee curve set by the deploy; ttm >= 360d so the flat cbp6 (0.005 WAD) applies
+const CBPS: [u16; 7] = [14, 14, 98, 417, 1250, 2500, 5000];
+const TARGET_SELLER_ASSETS: u128 = 99_000; // sizing: size a take to hit ~this many seller assets
 
 const fn hexlit(s: &str) -> [u8; 32] {
     let b = s.as_bytes();
@@ -113,16 +116,30 @@ fn gen() {
     );
     let cancel = encode_cancel_root_calldata(&maker, &root);
 
-    // predictions (fresh positions, zero fees)
+    // predictions (fresh positions, real non-zero settlement fee, ttm >= 360d -> flat cbp6)
     let ctx = SimCtx {
         now: 1,
-        market: SimMarket { tick_spacing: DEFAULT_TICK_SPACING, continuous_fee: 0, settlement_fee_cbp: [0; 7], loss_factor_maxed: false },
+        market: SimMarket { tick_spacing: DEFAULT_TICK_SPACING, continuous_fee: 0, settlement_fee_cbp: CBPS, loss_factor_maxed: false },
         consumed: 0,
         maker_position: Position::default(),
         taker_position: Position::default(),
         taker_is_maker: false,
     };
     let out = simulate_take(&offer, U256::from(UNITS), &ctx).unwrap();
+
+    // sizing: how many units to receive ~TARGET_SELLER_ASSETS, and what that take really yields
+    let units2 = seller_assets_to_units(&offer, U256::from(TARGET_SELLER_ASSETS), 1, CBPS).unwrap();
+    let pred2 = take_amounts(&offer, units2, 1, CBPS).unwrap();
+    let take2 = encode_take_calldata(&offer, &ratifier_data, units2, &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[]);
+
+    // validate: a tick not aligned to spacing (5 % 4 != 0) must be flagged AND revert on-chain
+    let bad = OfferBuilder::new(market(), maker).buy().tick(5).expiry(EXPIRY).group_u64(GROUP + 1)
+        .ratifier(ratifier).max_units(u128::MAX).continuous_fee_cap(U256::MAX).build();
+    let bad_ctx = ValidateCtx { market: Some(MarketSnapshot { tick_spacing: DEFAULT_TICK_SPACING, loss_factor_maxed: false, continuous_fee: 0 }), ..Default::default() };
+    let bad_flagged = validate_offer(&bad, &bad_ctx).contains(&OfferError::TickNotAccessible);
+    let bad_root = OfferTree::build(vec![hash_offer(&bad)]).unwrap().root();
+    let bad_rd = encode_ratifier_data(&sign_digest(&sk, &tree_digest(bad_root, 0, chain_id, &ratifier)), &bad_root, 0, &[]);
+    let bad_take = encode_take_calldata(&bad, &bad_rd, U256::from(UNITS), &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[]);
 
     println!("MAKER {}", hx(&maker));
     println!("ROOT {}", hx(&root));
@@ -142,6 +159,13 @@ fn gen() {
     println!("PRED_BUYER_CREDIT_INCREASE {}", out.buyer_credit_increase);
     println!("PRED_SELLER_DEBT_INCREASE {}", out.seller_debt_increase);
     println!("PRED_NEW_CONSUMED {}", out.new_consumed);
+    // sizing: take2 sized to target
+    println!("TAKE2_CALLDATA {}", hx(&take2));
+    println!("SIZING_UNITS {units2}");
+    println!("PRED_SELLER_ASSETS2 {}", pred2.seller_assets);
+    // validate: bad-tick offer
+    println!("BAD_TAKE_CALLDATA {}", hx(&bad_take));
+    println!("VALIDATE_FLAGGED_TICK {bad_flagged}");
 }
 
 fn read_hex_arg(a: &str) -> Vec<u8> {
