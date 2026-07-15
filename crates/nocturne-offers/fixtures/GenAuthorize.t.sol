@@ -7,6 +7,9 @@
 // and asserts the real on-chain `setIsAuthorized` accepts the signature — then prints every
 // value the Rust side must reproduce.
 //
+// No stubs: the authorizer is backed by the REAL `Midnight` contract, and its forwarded
+// `IMidnight(MIDNIGHT).setIsAuthorized(...)` call really executes against it.
+//
 // Regenerate (from the midnight contracts repo, pinned at the rev in authorize.rs):
 //   cp crates/nocturne-offers/fixtures/GenAuthorize.t.sol <midnight>/test/GenAuthorize.t.sol
 //   cd <midnight> && forge test --match-contract GenAuthorize -vv
@@ -15,20 +18,13 @@ pragma solidity 0.8.34;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {EcrecoverAuthorizer} from "../src/periphery/EcrecoverAuthorizer.sol";
+import {Midnight} from "../src/Midnight.sol";
 import {
     Authorization,
     Signature,
     AUTHORIZATION_TYPEHASH,
     EIP712_DOMAIN_TYPEHASH
 } from "../src/periphery/interfaces/IEcrecoverAuthorizer.sol";
-
-contract MidnightStub {
-    function isAuthorized(address, address) external pure returns (bool) {
-        return false;
-    }
-
-    function setIsAuthorized(address, bool, address) external {}
-}
 
 contract GenAuthorizeTest is Test {
     uint256 constant PK = 0xA11CE;
@@ -54,13 +50,23 @@ contract GenAuthorizeTest is Test {
 
     function test_generate() public {
         authorizer = vm.addr(PK);
-        // Real EcrecoverAuthorizer; MIDNIGHT points at a stub so setIsAuthorized can complete.
-        authorizer_ = new EcrecoverAuthorizer(address(new MidnightStub()));
+        // Real EcrecoverAuthorizer backed by the real Midnight (no stub). Deployment order is
+        // Midnight first, authorizer second — identical to the previous (stub-first, authorizer-
+        // second) layout, so the authorizer address (the EIP-712 verifyingContract) is unchanged.
+        Midnight midnight = new Midnight();
+        authorizer_ = new EcrecoverAuthorizer(address(midnight));
 
         Authorization memory a = makeAuthorization();
         (bytes32 hashStruct, bytes32 digest) = computeDigest(a);
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(PK, digest);
+
+        // The authorizer forwards to Midnight.setIsAuthorized on behalf of `a.authorizer`, which
+        // requires the authorizer contract to be authorized by that account on Midnight. Grant it
+        // (as the account itself) so the real forwarded call succeeds. This is post-deployment and
+        // deploys nothing, so it does not affect the authorizer address or the EIP-712 digest.
+        vm.prank(a.authorizer);
+        midnight.setIsAuthorized(address(authorizer_), true, a.authorizer);
 
         // Prove the real authorizer accepts this signature (signer == authorization.authorizer).
         authorizer_.setIsAuthorized(a, Signature(v, r, s));
