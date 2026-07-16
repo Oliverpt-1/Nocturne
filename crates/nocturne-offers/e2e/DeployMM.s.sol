@@ -31,7 +31,9 @@ contract DeployMM is Script {
 
     uint256 constant LLTV = 0.77e18;
     uint256 constant CURSOR = 0.3e18;
-    uint256 constant MATURITY = 4_000_000_000;
+    // anvil is started with --timestamp 1_000_000_000, so this is exactly 1 year to maturity,
+    // making APR quoting realistic while keeping the settlement fee flat (ttm > 360 days).
+    uint256 constant MATURITY = 1_031_536_000;
     uint256 constant UNITS = 1_000_000;
 
     function run() external {

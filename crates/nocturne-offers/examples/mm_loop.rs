@@ -1,9 +1,10 @@
-//! Market-making loop driver — the SDK builds a *grid* of lend offers into one signed tree and
-//! emits, per rung, the take calldata + predicted fills for a round. The shell (e2e/mm.sh) drives
-//! rounds against a real Midnight on anvil: quote a grid, take full + partial, move fair value,
-//! re-quote, cancel-and-replace, and check inventory — all vs the SDK's predictions.
+//! Market-making loop driver — the SDK quotes a *grid of lend offers by APR* into one signed tree
+//! and emits, per rung, the resolved tick, the realized APR, the take calldata, and predicted
+//! fills. The shell (e2e/mm.sh) drives rounds against a real Midnight on anvil: quote a grid by
+//! APR, take full + partial, move fair value, re-quote, cancel-and-replace, and check inventory —
+//! every fill vs the SDK's take_amounts predictions, proving APR -> tick -> price -> on-chain fill.
 //!
-//!   cargo run --example mm_loop -- grid <base_tick> <group_base>
+//!   cargo run --example mm_loop -- grid <fair_apr> <group_base>
 
 use k256::ecdsa::SigningKey;
 use nocturne_offers::*;
@@ -11,12 +12,14 @@ use nocturne_offers::*;
 const PK1: [u8; 32] = hexlit("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"); // maker
 const ACCOUNT0: &str = "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"; // taker
 const CHAIN_ID: u64 = 31337;
-const MATURITY: u64 = 4_000_000_000;
-const EXPIRY: u64 = 4_000_000_000;
+const NOW: u64 = 1_000_000_000; // anvil genesis timestamp (mm.sh starts anvil with --timestamp)
+const MATURITY: u64 = 1_031_536_000; // NOW + 1 year
+const EXPIRY: u64 = 1_031_000_000;
 const LLTV: u64 = 770_000_000_000_000_000;
 const CURSOR: u64 = 300_000_000_000_000_000;
 const CBPS: [u16; 7] = [14, 14, 98, 417, 1250, 2500, 5000];
 const GRID: u64 = 4; // 4 rungs -> height-2 tree
+const APR_STEP: f64 = 4.0; // % between rungs (wide enough for distinct ticks near par)
 const MAX_UNITS: u128 = 5_000_000;
 const FULL: u128 = 1_000_000;
 const PARTIAL: u128 = 400_000;
@@ -41,35 +44,37 @@ fn market() -> Market {
         .build()
 }
 
-fn rung(maker: Address, ratifier: Address, tick: u64, group: u64) -> Offer {
+fn rung(maker: Address, ratifier: Address, apr: f64, group: u64) -> Offer {
     OfferBuilder::new(market(), maker)
-        .buy() // lend: maker buys credit
-        .tick(tick)
+        .lend()               // maker lends: buys credit
+        .apr(apr, NOW)        // APR -> tick, snapped to the accessible grid
         .expiry(EXPIRY)
         .group_u64(group)
         .ratifier(ratifier)
         .max_units(MAX_UNITS)
         .continuous_fee_cap(U256::MAX)
-        .build()
+        .build_checked()
+        .expect("apr build")
 }
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    assert_eq!(a[1], "grid", "usage: mm_loop grid <base_tick> <group_base>");
-    let base: u64 = a[2].parse().unwrap();
+    assert_eq!(a[1], "grid", "usage: mm_loop grid <fair_apr> <group_base>");
+    let fair_apr: f64 = a[2].parse().unwrap();
     let group_base: u64 = a[3].parse().unwrap();
 
     let sk = SigningKey::from_bytes(&PK1.into()).unwrap();
     let maker = signer_address(&sk);
     let ratifier = env_addr("RATIFIER");
     let chain_id = word_from_u64(CHAIN_ID);
+    let ttm = MATURITY - NOW;
 
-    // build the grid: GRID rungs at base, base+4, base+8, base+12 (spacing 4)
-    let offers: Vec<Offer> = (0..GRID).map(|i| rung(maker, ratifier, base + 4 * i, group_base + i)).collect();
+    // grid: rungs at fair_apr, fair_apr+STEP, ... (a rate ladder), quoted BY APR
+    let aprs: Vec<f64> = (0..GRID).map(|i| fair_apr + APR_STEP * i as f64).collect();
+    let offers: Vec<Offer> = aprs.iter().enumerate().map(|(i, &apr)| rung(maker, ratifier, apr, group_base + i as u64)).collect();
     let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
     let root = tree.root();
-    let digest = tree_digest(root, tree.height(), chain_id, &ratifier);
-    let sig = sign_digest(&sk, &digest);
+    let sig = sign_digest(&sk, &tree_digest(root, tree.height(), chain_id, &ratifier));
 
     println!("MAKER {}", hx(&maker));
     println!("ROOT {}", hx(&root));
@@ -80,15 +85,18 @@ fn main() {
         encode_take_calldata(o, &rd, U256::from(units), &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[])
     };
     for (i, o) in offers.iter().enumerate() {
-        let full = take_amounts(o, U256::from(FULL), 1, CBPS).unwrap();
-        let part = take_amounts(o, U256::from(PARTIAL), 1, CBPS).unwrap();
+        let tick = word_to_u128(&o.tick).unwrap() as u64;
+        let full = take_amounts(o, U256::from(FULL), NOW, CBPS).unwrap();
+        let part = take_amounts(o, U256::from(PARTIAL), NOW, CBPS).unwrap();
+        println!("R{i}_APR {:.2}", aprs[i]);
+        println!("R{i}_TICK {tick}");
+        println!("R{i}_REALIZED_APR {:.4}", tick_to_apr(tick, ttm).unwrap());
         println!("R{i}_GROUP {}", group_base + i as u64);
         println!("R{i}_TAKE_FULL {}", hx(&take(o, i, FULL)));
         println!("R{i}_TAKE_PARTIAL {}", hx(&take(o, i, PARTIAL)));
         println!("R{i}_FULL_SELLER_ASSETS {}", full.seller_assets);
         println!("R{i}_PARTIAL_SELLER_ASSETS {}", part.seller_assets);
     }
-    // convenience totals used by the shell's inventory checks
     println!("FULL {FULL}");
     println!("PARTIAL {PARTIAL}");
 }

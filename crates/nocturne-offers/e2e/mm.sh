@@ -25,7 +25,8 @@ send()    { cast send "$1" "$2" --rpc-url "$RPC" --private-key "$3" >/dev/null; 
 
 echo "== deploy REAL Midnight for the MM loop =="
 pkill -f "anvil --port 8545" 2>/dev/null || true; sleep 1
-anvil --port 8545 --silent >/tmp/nocturne-mm-anvil.log 2>&1 &
+# fixed genesis timestamp so "1 year to maturity" is exact -> realistic APR quoting
+anvil --port 8545 --timestamp 1000000000 --silent >/tmp/nocturne-mm-anvil.log 2>&1 &
 sleep 3
 cp "$CRATE/e2e/DeployMM.s.sol" "$MID/script/DeployMM.s.sol"
 D=$(cd "$MID" && forge script script/DeployMM.s.sol --tc DeployMM --rpc-url "$RPC" --broadcast --private-key "$PK0" 2>&1)
@@ -38,11 +39,15 @@ ok "deployed real Midnight ($MIDNIGHT)"
 
 run_grid() { cd "$CRATE" && cargo run --quiet --example mm_loop -- grid "$1" "$2"; }
 
-echo "== round 1: quote a grid (one signed tree, 4 rungs) @ fair tick 3372 =="
-G1=$(run_grid 3372 100)
+echo "== round 1: quote a grid BY APR (one signed tree, 4 rungs) @ fair 10% =="
+G1=$(run_grid 10 100)
 g1() { grep -E "^$1 " <<<"$G1" | awk '{print $2}'; }
 MAKER=$(g1 MAKER)
-ok "grid quoted, root $(g1 ROOT)"
+ok "grid quoted by APR, root $(g1 ROOT)"
+for i in 0 1 2 3; do echo "     rung$i: asked $(g1 R${i}_APR)% -> tick $(g1 R${i}_TICK) -> realized $(g1 R${i}_REALIZED_APR)%"; done
+# realized APR must be <= asked (apr_to_tick snaps to a not-worse price for the maker)
+awk -v a="$(g1 R0_APR)" -v r="$(g1 R0_REALIZED_APR)" 'BEGIN{ exit !(r<=a+0.0001) }' \
+  && ok "realized APR <= asked (rung0)" || fail "realized APR > asked"
 
 echo "== round 1: full fill on rung0, partial (x2) on rung1 =="
 LB=$(loanbal "$ACCOUNT0"); send "$MIDNIGHT" "$(g1 R0_TAKE_FULL)" "$PK0"
@@ -53,8 +58,8 @@ eq "rung1 consumed after 2 partials" "$(consumed "$MAKER" 101)" "800000"
 eq "maker credit (inventory)" "$(credit "$MAKER")" "1800000"
 eq "taker debt (inventory)"   "$(debt "$ACCOUNT0")" "1800000"
 
-echo "== round 2: fair value moves -> re-quote @ 3400, cancel & replace =="
-G2=$(run_grid 3400 200)
+echo "== round 2: fair value moves (10% -> 8%) -> re-quote, cancel & replace =="
+G2=$(run_grid 8 200)
 g2() { grep -E "^$1 " <<<"$G2" | awk '{print $2}'; }
 send "$RATIFIER" "$(g1 CANCEL)" "$PK1"
 if cast call "$MIDNIGHT" "$(g1 R2_TAKE_FULL)" --from "$ACCOUNT0" --rpc-url "$RPC" >/dev/null 2>&1; then
