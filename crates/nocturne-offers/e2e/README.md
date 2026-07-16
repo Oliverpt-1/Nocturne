@@ -27,3 +27,16 @@ Files: `DeployE2E.s.sol` (Solidity deploy, copied into the contracts repo to run
 `../examples/e2e.rs` (the tool-driven artifact generator), `run.sh` (orchestrator).
 The settlement fee is non-zero but the market maturity is far enough out that the fee is flat
 (the 360-day breakpoint), so predictions stay deterministic regardless of anvil timing.
+
+## Market-making loop
+
+```sh
+crates/nocturne-offers/e2e/mm.sh
+```
+
+A full MM lifecycle against real Midnight, driven by the SDK (`../examples/mm_loop.rs`,
+`DeployMM.s.sol`): quote a grid of lend offers **by APR** as one signed tree, full + partial
+fills, then a fair-value move → re-quote (new tree/root/sig) → cancel-and-replace (old root
+reverts `RootCanceled`, new grid fills at the new price), with inventory checked each round and
+every fill matched to `take_amounts`. Anvil is pinned to a fixed timestamp so maturity is exactly
+one year out, making APR quoting realistic while keeping the fee flat.
