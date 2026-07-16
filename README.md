@@ -21,7 +21,9 @@ take `U256`/`u64`/`u128` and convert for you. Snippets below assume `sk`, `chain
 
 ## Build offers
 
-Typed builders that pack the raw wire fields for you.
+Typed builders that pack the raw wire fields for you. Quote in ticks/units, or in **APR and
+notional** — `.lend()/.borrow()`, `.apr()`, `.assets()` convert for you (APR↔tick is parity-checked
+against `TickLib`).
 
 ```rust
 let market = MarketBuilder::new(1, midnight_addr, loan_token)
@@ -29,9 +31,20 @@ let market = MarketBuilder::new(1, midnight_addr, loan_token)
     .maturity(2_000_000_000)
     .build();
 
-let offer = OfferBuilder::new(market, maker)
+// low-level: ticks + units
+let offer = OfferBuilder::new(market.clone(), maker)
     .buy().tick(8).expiry(2_000_000_000).ratifier(ratifier).max_units(1_000_000)
     .build();                       // or .try_build(&ctx)? to validate first
+
+// human: APR + assets (converts APR->tick, assets->units)
+let offer = OfferBuilder::new(market, maker)
+    .lend().apr(7.2, now).assets(1_000_000, now, cbps)   // "lend at 7.2% for 1M"
+    .expiry(2_000_000_000).ratifier(ratifier)
+    .build_checked()?;              // surfaces conversion errors
+
+// or the raw conversions
+let tick = apr_to_tick(7.2, ttm_secs, DEFAULT_TICK_SPACING as u64)?;
+let apr  = tick_to_apr(tick, ttm_secs)?;   // simple annualized %, snaps to accessible ticks
 ```
 
 ## Hash · tree · proofs

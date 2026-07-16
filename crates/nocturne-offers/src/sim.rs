@@ -34,7 +34,20 @@ pub enum SimError {
     /// The settlement fee exceeds the offer price (the on-chain subtraction would underflow).
     #[error("settlement fee exceeds offer price")]
     SettlementFeeExceedsPrice,
+    /// A price passed to [`price_to_tick`] exceeds `1e18` (WAD), so it maps to no tick. Mirrors
+    /// `TickLib.priceToTick`'s `require(price <= 1e18, PriceGreaterThanOne())`.
+    #[error("price exceeds 1e18 (WAD)")]
+    PriceGreaterThanOne,
+    /// The time-to-maturity is zero, so a term rate cannot be annualized.
+    #[error("time-to-maturity is zero")]
+    ZeroTimeToMaturity,
+    /// The tick's price is zero, so the term rate `1/P - 1` is undefined.
+    #[error("price is zero; term rate is undefined")]
+    ZeroPrice,
 }
+
+/// Seconds in a (non-leap) year: `365 * 24 * 3600`. Used to annualize term rates in APR math.
+pub const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 #[inline]
 fn wad() -> U256 {
@@ -96,6 +109,91 @@ pub fn tick_to_price(tick: u64) -> Result<U256, SimError> {
     let step = U256::from(PRICE_ROUNDING_STEP);
     let p = div_half_down(e36(), inner);
     Ok(div_half_down(p, step) * step)
+}
+
+/// `TickLib.priceToTick` — among the ticks that are multiples of `spacing`, the lowest one whose
+/// price is greater than or equal to `price`.
+///
+/// Binary-searches [`tick_to_price`] for the lowest tick with `tick_to_price(tick) >= price`
+/// (prices are monotonically increasing in tick), then rounds that tick **up** to the next
+/// multiple of `spacing`: `(low + spacing - 1) / spacing * spacing`. `spacing` should divide
+/// `MAX_TICK` (the default is [`DEFAULT_TICK_SPACING`](crate::DEFAULT_TICK_SPACING)).
+///
+/// Errors with [`SimError::PriceGreaterThanOne`] when `price > 1e18` (WAD), exactly as the
+/// contract's `require(price <= 1e18, PriceGreaterThanOne())`.
+pub fn price_to_tick(price: U256, spacing: u64) -> Result<u64, SimError> {
+    if price > wad() {
+        return Err(SimError::PriceGreaterThanOne);
+    }
+    let mut low: u64 = 0;
+    let mut high: u64 = MAX_TICK;
+    while low != high {
+        let mid = (low + high) / 2;
+        if tick_to_price(mid)? < price {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    Ok((low + spacing - 1) / spacing * spacing)
+}
+
+/// The **simple annualized APR** of a tick, as a **percentage** (e.g. `7.2` means 7.2%).
+///
+/// The whitepaper defines the simple rate over the remaining term as `r = 1/P - 1`, where
+/// `P = tick_to_price(tick)` is the discounted price in WAD (`0..1e18`). This annualizes `r`
+/// **linearly** (simple, not compound) by the time-to-maturity:
+///
+/// ```text
+/// price_frac = tick_to_price(tick) / 1e18
+/// term_rate  = 1 / price_frac - 1
+/// apr_pct    = term_rate * (SECONDS_PER_YEAR / ttm_secs) * 100
+/// ```
+///
+/// Because price increases with tick, APR **decreases** with tick. Errors on `ttm_secs == 0`
+/// ([`SimError::ZeroTimeToMaturity`]) or a zero price ([`SimError::ZeroPrice`]).
+pub fn tick_to_apr(tick: u64, ttm_secs: u64) -> Result<f64, SimError> {
+    if ttm_secs == 0 {
+        return Err(SimError::ZeroTimeToMaturity);
+    }
+    let price = tick_to_price(tick)?;
+    if price.is_zero() {
+        return Err(SimError::ZeroPrice);
+    }
+    let price_frac = u128::try_from(price).expect("price <= 1e18 fits in u128") as f64 / 1e18;
+    let term_rate = 1.0 / price_frac - 1.0;
+    let apr_pct = term_rate * (SECONDS_PER_YEAR as f64 / ttm_secs as f64) * 100.0;
+    Ok(apr_pct)
+}
+
+/// Inverse of [`tick_to_apr`]: the lowest **accessible** tick that yields at most `apr_pct`.
+///
+/// Converts the simple annualized APR (percent) back to a WAD price and defers to
+/// [`price_to_tick`]:
+///
+/// ```text
+/// term_rate = (apr_pct / 100) * (ttm_secs / SECONDS_PER_YEAR)
+/// price_frac = 1 / (1 + term_rate)   // clamped to <= 1.0
+/// price_wad  = price_frac * 1e18
+/// tick       = price_to_tick(price_wad, spacing)
+/// ```
+///
+/// # Round-trip is not exact
+/// [`price_to_tick`] snaps **up** to the nearest accessible tick (price `>=` the target, aligned
+/// to `spacing`), so `apr_to_tick(tick_to_apr(t, ttm), ttm, spacing)` need not equal `t`. It is,
+/// however, guaranteed to land within one `spacing` step of `t`, and the resulting tick's APR is
+/// `<= apr_pct` (the snap only ever raises the price / lowers the rate).
+///
+/// A negative `apr_pct` (implied price above par) clamps `price_frac` to `1.0`, mapping to the
+/// tick nearest par. Errors propagate from [`price_to_tick`].
+pub fn apr_to_tick(apr_pct: f64, ttm_secs: u64, spacing: u64) -> Result<u64, SimError> {
+    let term_rate = (apr_pct / 100.0) * (ttm_secs as f64 / SECONDS_PER_YEAR as f64);
+    let mut price_frac = 1.0 / (1.0 + term_rate);
+    if price_frac > 1.0 {
+        price_frac = 1.0;
+    }
+    let price_wad = U256::from((price_frac * 1e18) as u128);
+    price_to_tick(price_wad, spacing)
 }
 
 /// `Midnight.settlementFee` — piecewise-linear interpolation over the 7 breakpoints (0/1/7/30/

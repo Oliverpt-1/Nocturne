@@ -6,9 +6,26 @@
 //! [`validate_offer`](crate::validate_offer) so a malformed offer never leaves the builder.
 
 use crate::{
-    u256_to_word, validate_offer, word_from_u64, Address, CollateralParams, Market, Offer,
-    OfferError, ValidateCtx, Word, U256,
+    apr_to_tick, buyer_assets_to_units, seller_assets_to_units, u256_to_word, validate_offer,
+    word_from_u64, word_to_u256, Address, CollateralParams, Market, Offer, OfferError, SimError,
+    SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, U256,
 };
+
+/// A conversion failure captured by the ergonomic [`OfferBuilder`] setters ([`apr`](OfferBuilder::apr) /
+/// [`assets`](OfferBuilder::assets)) and surfaced at [`build_checked`](OfferBuilder::build_checked)
+/// time, so those setters never panic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum BuildError {
+    /// An APR→tick conversion failed (see [`apr_to_tick`](crate::apr_to_tick)).
+    #[error(transparent)]
+    Sim(#[from] SimError),
+    /// An assets→units conversion failed (see [`buyer_assets_to_units`](crate::buyer_assets_to_units)).
+    #[error(transparent)]
+    Sizing(#[from] SizingError),
+    /// The computed unit count does not fit in the `u128` `maxUnits` field.
+    #[error("computed units exceed u128")]
+    UnitsOverflow,
+}
 
 /// Builder for a [`Market`]. Collateral params must be added in ascending token order (the only
 /// ordering the protocol accepts); `try_build` on the offer will flag it otherwise.
@@ -113,6 +130,7 @@ pub struct OfferBuilder {
     max_units: u128,
     max_assets: u128,
     continuous_fee_cap: U256,
+    error: Option<BuildError>,
 }
 
 impl OfferBuilder {
@@ -134,6 +152,14 @@ impl OfferBuilder {
             max_units: 0,
             max_assets: 0,
             continuous_fee_cap: U256::ZERO,
+            error: None,
+        }
+    }
+
+    /// Record the first conversion error so [`build_checked`](Self::build_checked) can surface it.
+    fn record_err(&mut self, e: BuildError) {
+        if self.error.is_none() {
+            self.error = Some(e);
         }
     }
 
@@ -150,6 +176,16 @@ impl OfferBuilder {
 
     /// Shorthand for `side(false)`.
     pub fn sell(self) -> Self {
+        self.side(false)
+    }
+
+    /// Shorthand for `side(true)` — a lender buys the loan (maker is the buyer).
+    pub fn lend(self) -> Self {
+        self.side(true)
+    }
+
+    /// Shorthand for `side(false)` — a borrower sells the loan (maker is the seller).
+    pub fn borrow(self) -> Self {
         self.side(false)
     }
 
@@ -228,7 +264,74 @@ impl OfferBuilder {
         self
     }
 
+    /// Set the tick from a target **simple annualized APR** (percent, e.g. `7.2` = 7.2%).
+    ///
+    /// Computes the time-to-maturity as `market.maturity - now` and converts via
+    /// [`apr_to_tick`](crate::apr_to_tick) at [`DEFAULT_TICK_SPACING`], snapping to the lowest
+    /// accessible tick whose price is `>=` the target (so the realized APR is `<=` `apr_pct`).
+    ///
+    /// Never panics: any conversion error is stored and surfaced by
+    /// [`build_checked`](Self::build_checked). Because of this, offers built with `.apr()` must be
+    /// finalized with [`build_checked`](Self::build_checked) (or validated via `try_build`), not the
+    /// infallible [`build`](Self::build).
+    pub fn apr(mut self, apr_pct: f64, now: u64) -> Self {
+        let maturity = word_to_u256(&self.market.maturity);
+        let ttm = maturity.saturating_sub(U256::from(now));
+        let ttm_secs = u64::try_from(ttm).unwrap_or(u64::MAX);
+        match apr_to_tick(apr_pct, ttm_secs, DEFAULT_TICK_SPACING as u64) {
+            Ok(tick) => self.tick = U256::from(tick),
+            Err(e) => self.record_err(e.into()),
+        }
+        self
+    }
+
+    /// Set [`max_units`](Self::max_units) from a target **asset** (notional) amount.
+    ///
+    /// Sizes the maker's side: for a buy offer the maker is the buyer
+    /// ([`buyer_assets_to_units`](crate::buyer_assets_to_units)); for a sell offer the maker is the
+    /// seller ([`seller_assets_to_units`](crate::seller_assets_to_units)). `cbps` are the market's
+    /// `settlementFeeCbp0..6`. Set the tick (via [`tick`](Self::tick) or [`apr`](Self::apr)) first,
+    /// since sizing depends on the price.
+    ///
+    /// Never panics: any conversion error is stored and surfaced by
+    /// [`build_checked`](Self::build_checked), so offers built with `.assets()` must be finalized
+    /// with [`build_checked`](Self::build_checked) (or `try_build`), not [`build`](Self::build).
+    pub fn assets(mut self, target_assets: u128, now: u64, cbps: [u16; 7]) -> Self {
+        let offer = self.clone().build();
+        let target = U256::from(target_assets);
+        let res = if self.buy {
+            buyer_assets_to_units(&offer, target, now, cbps)
+        } else {
+            seller_assets_to_units(&offer, target, now, cbps)
+        };
+        match res {
+            Ok(units) => match u128::try_from(units) {
+                Ok(u) => {
+                    self.max_units = u;
+                    self.max_assets = 0;
+                }
+                Err(_) => self.record_err(BuildError::UnitsOverflow),
+            },
+            Err(e) => self.record_err(e.into()),
+        }
+        self
+    }
+
+    /// Produce the `Offer`, or the first conversion error stored by [`apr`](Self::apr) /
+    /// [`assets`](Self::assets). Unlike [`try_build`](Self::try_build) this does not run offer
+    /// validation; it only reports conversion failures from the ergonomic setters.
+    pub fn build_checked(self) -> Result<Offer, BuildError> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+        Ok(self.build())
+    }
+
     /// Produce the `Offer` without validating it.
+    ///
+    /// Note: this ignores any error stored by [`apr`](Self::apr) / [`assets`](Self::assets); use
+    /// [`build_checked`](Self::build_checked) (or [`try_build`](Self::try_build)) when those setters
+    /// were used.
     pub fn build(self) -> Offer {
         Offer {
             market: self.market,
