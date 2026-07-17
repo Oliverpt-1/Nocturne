@@ -221,7 +221,7 @@ pub fn hash_node(left: &Word, right: &Word) -> Word {
 /// A perfect binary Merkle tree over offer leaves. `height` = log2(leaves.len()).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OfferTree {
-    /// levels[0] = leaves, levels[height] = [root]
+    /// `levels[0]` = leaves, `levels[height]` = `[root]`
     pub levels: Vec<Vec<Word>>,
 }
 
