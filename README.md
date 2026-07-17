@@ -12,7 +12,7 @@
 
 ## What is Nocturne?
 
-**Nocturne** is a production-ready signing and offer library for the
+**Nocturne** is a fast, well-tested signing and offer library for the
 [Morpho Midnight](https://github.com/morpho-org/midnight) protocol, focused on speed and execution.
 It is compatible with all deployments of Midnight. Midnight is an onchain protocol by design;
 however, offers are explicitly handled offchain - which is where Nocturne operates. Every hash,
@@ -26,9 +26,9 @@ Built and operated by Oliver Tipton, and licensed under the Apache-2.0 and MIT l
 
 ## Status
 
-This is v1.0 of Nocturne, so early stages. Nocturne is parity-checked byte-for-byte against the Midnight contracts and
-exercised end-to-end on a live anvil deployment, but it has **not** been independently
-security-audited. Verify against your own deployment before relying on it with real value, and see
+This is an early (v0.1.0) release. Nocturne is parity-checked byte-for-byte against the Midnight
+contracts and exercised end-to-end on a live anvil deployment, but it has **not** been
+independently security-audited. Verify against your own deployment before relying on it with real value, and see
 [SECURITY.md](SECURITY.md) to report issues.
 
 ## Getting help
@@ -36,7 +36,7 @@ security-audited. Verify against your own deployment before relying on it with r
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
 - Open a [GitHub issue](https://github.com/Oliverpt-1/midnight-rust/issues) for bugs and features.
 
-## Usage
+## For Developers
 
 Add the crate:
 
