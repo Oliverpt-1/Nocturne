@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/nocturne.png" alt="Nocturne — made in Rust" width="640">
+  <a href="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml"><img src="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0"></a>
 </p>
 
 <p align="center"><em>Fast off-chain signing and offers for the Morpho Midnight protocol.</em></p>
 
 <p align="center">
-  <a href="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml"><img src="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0"></a>
+  <img src="assets/nocturne.png" alt="Nocturne — made in Rust" width="640">
 </p>
 
 ## What is Nocturne?
