@@ -43,21 +43,23 @@ independently security-audited. Verify against your own deployment before relyin
 
 ## For Developers
 
-Add the crate:
+Add the crate and call it from your own program:
 
 ```toml
 [dependencies]
 nocturne = { path = "crates/nocturne" }
 ```
 
-The complete API - every callable, with examples - lives in the crate docs. Browse it on
-**[docs.rs/nocturne](https://docs.rs/nocturne)** (once published), or locally with `cargo doc --open`.
-The crate root has a copy-paste quickstart. Runnable programs are in
-[`examples/`](crates/nocturne/examples/):
+The full API - every callable - is on **[docs.rs/nocturne](https://docs.rs/nocturne)** (once
+published), or locally with `cargo doc --open`. The crate root has a copy-paste quickstart.
+
+The programs in [`examples/`](crates/nocturne/examples/) are **illustrative demos** - dummy keys
+and addresses, nothing touches a chain. They show how to call the API; they don't post real
+offers:
 
 ```sh
-cargo run --example quickstart       # build an offer -> sign the tree -> verify it ratifies
-cargo run --release --example bench  # re-quote pipeline benchmark (hash -> tree -> proofs -> sign)
+cargo run --example quickstart        # demo: build -> sign -> verify an offer in memory
+cargo run --release --example bench   # perf: time the hash -> tree -> sign pipeline
 ```
 
 ## Security
