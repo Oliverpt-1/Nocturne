@@ -9,7 +9,7 @@ any correctness or signing issue as potentially security-relevant.
 
 - Use GitHub's **[Report a vulnerability](https://github.com/Oliverpt-1/midnight-rust/security/advisories/new)**
   (Security → Advisories), or
-- email **oliver@morpho.xyz** with details and, if possible, a reproduction.
+- email **oliverptipton@gmail.com** with details and, if possible, a reproduction.
 
 Please include the affected version/commit, the impact, and steps to reproduce. We aim to
 acknowledge within a few business days and will coordinate a fix and disclosure timeline with you.
