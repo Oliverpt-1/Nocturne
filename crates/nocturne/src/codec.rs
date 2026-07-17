@@ -67,7 +67,7 @@ impl Value {
         }
     }
 
-    /// Size in bytes of the inline (head) encoding — only defined for static values.
+    /// Size in bytes of the inline (head) encoding - only defined for static values.
     fn static_size(&self) -> usize {
         match self {
             Value::Word(_) => 32,
@@ -176,7 +176,7 @@ fn offer_value(o: &Offer) -> Value {
 // ---- public encoders ----
 
 /// `abi.encode(Signature{uint8 v, bytes32 r, bytes32 s}, bytes32 root, uint256 leafIndex,
-/// bytes32[] proof)` — the `ratifierData` consumed by `EcrecoverRatifier.isRatified`.
+/// bytes32[] proof)` - the `ratifierData` consumed by `EcrecoverRatifier.isRatified`.
 ///
 /// `Signature` is a fully static tuple, so it is inlined as three head words (`v` padded, `r`,
 /// `s`); `root` and `leafIndex` are static words; `proof` is a dynamic array (offset in the head,

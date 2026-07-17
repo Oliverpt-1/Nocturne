@@ -290,7 +290,7 @@ impl MarketStateView {
 ///
 /// Field order and widths mirror the getter: `totalUnits(u128)`, `lossFactor(u128)`,
 /// `withdrawable(u128)`, `continuousFeeCredit(u128)`, `settlementFeeCbp0..6` (7×u16),
-/// `continuousFee(u32)`, `tickSpacing(u8)` — each padded to its own 32-byte word.
+/// `continuousFee(u32)`, `tickSpacing(u8)` - each padded to its own 32-byte word.
 pub fn decode_market_state(bytes: &[u8]) -> Result<MarketStateView, DecodeError> {
     let total_units = word_to_u128(&head_word(bytes, 0, 0)?)?;
     let loss_factor = word_to_u128(&head_word(bytes, 0, 1)?)?;
@@ -348,7 +348,7 @@ impl PositionView {
 /// Decode the raw `eth_call` return of `position(id, user)`.
 ///
 /// Field order mirrors the getter: `credit`, `pendingFee`, `lastLossFactor`, `lastAccrual`,
-/// `debt`, `collateralBitmap` — each a `uint128` in its own 32-byte word.
+/// `debt`, `collateralBitmap` - each a `uint128` in its own 32-byte word.
 pub fn decode_position(bytes: &[u8]) -> Result<PositionView, DecodeError> {
     Ok(PositionView {
         credit: word_to_u128(&head_word(bytes, 0, 0)?)?,

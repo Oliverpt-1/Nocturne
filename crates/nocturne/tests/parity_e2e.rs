@@ -2,7 +2,7 @@
 //!
 //! Unlike `parity.rs` (which checks only the typehash constants), this reconstructs a concrete
 //! 4-offer tree and asserts that the Rust leaf hash, Merkle root, signed digest, and signer
-//! recovery all match what the on-chain contract computes — and that the signature the contract
+//! recovery all match what the on-chain contract computes - and that the signature the contract
 //! accepted also passes `nocturne::verify`.
 //!
 //! The expected values are produced by `fixtures/GenEndToEnd.t.sol`, which drives the actual

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// E2E deploy: a REAL Morpho Midnight environment on anvil — real Midnight, EcrecoverRatifier,
+// E2E deploy: a REAL Morpho Midnight environment on anvil - real Midnight, EcrecoverRatifier,
 // EcrecoverAuthorizer, a real (mintable) ERC20 loan+collateral, and an Oracle. No stubs.
 // Fees left at zero so the Rust tools' amount predictions are deterministic regardless of anvil
 // timing. Deploys, configures, funds, creates the market, and logs every address for the driver.

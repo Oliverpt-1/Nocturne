@@ -60,7 +60,7 @@ fn offer_serde_roundtrips_and_preserves_hash() {
     let offer = sample_offer();
     let json = serde_json::to_string(&offer).unwrap();
     let back: Offer = serde_json::from_str(&json).unwrap();
-    // The decoded offer hashes identically — serialization is lossless where it counts.
+    // The decoded offer hashes identically - serialization is lossless where it counts.
     assert_eq!(hash_offer(&offer), hash_offer(&back));
 }
 

@@ -16,7 +16,7 @@ acknowledge within a few business days and will coordinate a fix and disclosure 
 
 ## Scope
 
-In scope — anything that could cause a maker to sign or submit something other than intended, or a
+In scope - anything that could cause a maker to sign or submit something other than intended, or a
 consumer to mis-read on-chain state:
 
 - incorrect EIP-712 hashing / digest assembly (an offer or authorization that verifies differently

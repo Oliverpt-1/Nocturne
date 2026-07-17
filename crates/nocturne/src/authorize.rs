@@ -52,7 +52,7 @@ impl Authorization {
 pub const AUTHORIZATION_TYPE: &str =
     "Authorization(address authorizer,address authorized,bool isAuthorized,uint256 nonce,uint256 deadline)";
 
-/// `keccak256(AUTHORIZATION_TYPE)` — matches the on-chain `AUTHORIZATION_TYPEHASH` constant.
+/// `keccak256(AUTHORIZATION_TYPE)` - matches the on-chain `AUTHORIZATION_TYPEHASH` constant.
 /// Tests assert [`authorization_typehash`] reproduces this value.
 pub const AUTHORIZATION_TYPEHASH: Word = [
     0x81, 0xd0, 0x28, 0x4f, 0xb0, 0xe2, 0xcd, 0xe1, 0x8d, 0x05, 0x53, 0xb0, 0x61, 0x89, 0xd6, 0xf7,

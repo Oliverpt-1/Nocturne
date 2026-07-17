@@ -1,15 +1,15 @@
 //! Signer abstraction with a vendor-agnostic KMS/HSM path.
 //!
 //! Institutions rarely hold a raw private key in process; they sign through a service
-//! (AWS KMS, GCP KMS, or a PKCS#11 HSM). Those services return a raw ECDSA signature —
-//! DER-encoded, or as `(r, s)` — over the 32-byte digest, but they do **not** return the
+//! (AWS KMS, GCP KMS, or a PKCS#11 HSM). Those services return a raw ECDSA signature -
+//! DER-encoded, or as `(r, s)` - over the 32-byte digest, but they do **not** return the
 //! recovery id (`v`) that Ethereum's `ecrecover` needs, and they may return a high-`s`
 //! value. This module supplies the glue that turns such a signature into the crate's
 //! [`Sig`] `{ r, s, v }`:
 //!
 //! * normalize `s` to its low-`s` form (BIP-0062), since the EVM and most tooling expect it;
 //! * brute-force `v` (27 then 28) against the *known* signer address, using [`crate::recover`],
-//!   because flipping `s` can flip the parity — so the only reliable way to pin `v` is to try
+//!   because flipping `s` can flip the parity - so the only reliable way to pin `v` is to try
 //!   both and keep the one that recovers the expected address.
 //!
 //! No cloud SDKs are pulled in: [`ExternalSigner`] takes a closure, so an integrator wires the
@@ -54,7 +54,7 @@ pub trait Signer {
     fn sign_digest(&self, digest: &Word) -> Result<Sig, SignerError>;
 }
 
-/// A signer backed by an in-process secp256k1 key. Reference/testing path — prefer
+/// A signer backed by an in-process secp256k1 key. Reference/testing path - prefer
 /// [`ExternalSigner`] for anything holding real value.
 #[derive(Clone)]
 pub struct LocalSigner {
@@ -143,8 +143,8 @@ pub fn sig_from_der(
     sig_from_rs(digest, &r, &s, expected_signer)
 }
 
-/// A signer whose private key lives in an external service — AWS KMS, GCP KMS, or a PKCS#11
-/// HSM — reached through a caller-supplied closure. This is the production path for
+/// A signer whose private key lives in an external service - AWS KMS, GCP KMS, or a PKCS#11
+/// HSM - reached through a caller-supplied closure. This is the production path for
 /// institutions that cannot hold raw keys in process.
 ///
 /// The closure receives the 32-byte digest and must return a DER-encoded ECDSA signature over
@@ -158,11 +158,11 @@ pub fn sig_from_der(
 /// address (`keccak256(pubkey)[12..]`). Pass that as `address`.
 ///
 /// Per signature, the closure calls `kms:Sign` with:
-/// * `MessageType = DIGEST` — you are signing the 32-byte digest directly, not a message;
+/// * `MessageType = DIGEST` - you are signing the 32-byte digest directly, not a message;
 /// * `SigningAlgorithm = ECDSA_SHA_256`;
 /// * `Message = <the 32-byte digest>`.
 ///
-/// KMS returns `Signature` as a DER-encoded ECDSA signature — return those bytes from the
+/// KMS returns `Signature` as a DER-encoded ECDSA signature - return those bytes from the
 /// closure. [`ExternalSigner::sign_digest`] then normalizes `s` and pins `v`. GCP KMS
 /// (`AsymmetricSign`) and PKCS#11 HSMs follow the same shape: sign the digest, hand back DER.
 ///

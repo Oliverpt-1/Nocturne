@@ -1,12 +1,12 @@
-//! Local take simulation — "if a taker lifts this offer for N units, what executes?"
+//! Local take simulation - "if a taker lifts this offer for N units, what executes?"
 //!
 //! Ports the price / fee / amount / position math from `Midnight.take` (and `TickLib`,
 //! `settlementFee`) so a maker can see the exact assets that would move and the position deltas
 //! that would result, off-chain, without a node round-trip. This is the analog of a local EVM
 //! simulator for the one call that matters on the hot path.
 //!
-//! Scope: the deterministic economic outcome — tick→price, settlement fee, buyer/seller assets,
-//! consumption, and credit/debt/fee deltas — plus the take-time revert reasons that are locally
+//! Scope: the deterministic economic outcome - tick→price, settlement fee, buyer/seller assets,
+//! consumption, and credit/debt/fee deltas - plus the take-time revert reasons that are locally
 //! computable. Out of scope (needs live chain reads / external calls): gate checks, borrower
 //! health, ratifier/authorization, and position slashing + fee accrual. Positions passed in are
 //! assumed already up to date (i.e. post-`_updatePosition`).
@@ -85,7 +85,7 @@ fn zero_floor_sub(x: U256, y: U256) -> U256 {
     }
 }
 
-/// `TickLib.wExp` — WAD-scaled exponential. The polynomial fits in `i128`; only the final shift
+/// `TickLib.wExp` - WAD-scaled exponential. The polynomial fits in `i128`; only the final shift
 /// and reciprocal need 256 bits.
 fn wexp(x: i128) -> U256 {
     if x < 0 {
@@ -99,7 +99,7 @@ fn wexp(x: i128) -> U256 {
     U256::from(exp_r as u128) << (q as usize)
 }
 
-/// `TickLib.tickToPrice` — the WAD price for a tick, rounded to `PRICE_ROUNDING_STEP`.
+/// `TickLib.tickToPrice` - the WAD price for a tick, rounded to `PRICE_ROUNDING_STEP`.
 pub fn tick_to_price(tick: u64) -> Result<U256, SimError> {
     if tick > MAX_TICK {
         return Err(SimError::TickOutOfRange(tick as u128));
@@ -111,7 +111,7 @@ pub fn tick_to_price(tick: u64) -> Result<U256, SimError> {
     Ok(div_half_down(p, step) * step)
 }
 
-/// `TickLib.priceToTick` — among the ticks that are multiples of `spacing`, the lowest one whose
+/// `TickLib.priceToTick` - among the ticks that are multiples of `spacing`, the lowest one whose
 /// price is greater than or equal to `price`.
 ///
 /// Binary-searches [`tick_to_price`] for the lowest tick with `tick_to_price(tick) >= price`
@@ -196,7 +196,7 @@ pub fn apr_to_tick(apr_pct: f64, ttm_secs: u64, spacing: u64) -> Result<u64, Sim
     price_to_tick(price_wad, spacing)
 }
 
-/// `Midnight.settlementFee` — piecewise-linear interpolation over the 7 breakpoints (0/1/7/30/
+/// `Midnight.settlementFee` - piecewise-linear interpolation over the 7 breakpoints (0/1/7/30/
 /// 90/180/360 days), returned in WAD. `cbps` are the market's `settlementFeeCbp0..6`.
 pub fn settlement_fee(cbps: [u16; 7], time_to_maturity: U256) -> U256 {
     let day = |d: u64| U256::from(d * SEC_PER_DAY);

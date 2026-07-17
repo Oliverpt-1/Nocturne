@@ -4,7 +4,7 @@
 // Calls the real TakeAmountsLib.buyerAssetsToUnits / sellerAssetsToUnits and
 // ConsumableUnitsLib.consumableUnits against a live market (rev in tests/sizing.rs) and prints the
 // results. The values are baked into tests/sizing.rs, which asserts buyer_assets_to_units /
-// seller_assets_to_units / consumable_units reproduce them — promoting the inverse sizing math from
+// seller_assets_to_units / consumable_units reproduce them - promoting the inverse sizing math from
 // hand-verified to contract-anchored, the same standard as sim_take_parity.rs.
 //
 // Extends the contracts' own BaseTest to inherit market setup, tokens, and the DummyRatifier.

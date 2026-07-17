@@ -1,4 +1,4 @@
-//! Policy validation — "will the router accept this offer?"
+//! Policy validation - "will the router accept this offer?"
 //!
 //! Mirrors the offer-relevant revert conditions in `Midnight.take` (and the market checks in
 //! `touchMarket`) so a maker can reject a malformed offer *before* signing and posting a grid,
@@ -99,7 +99,7 @@ pub struct ValidateCtx {
 pub enum Cap {
     /// Consumption is capped in units (`maxUnits`).
     Units(u128),
-    /// Consumption is capped in assets — buyer assets if `buy`, else seller assets (`maxAssets`).
+    /// Consumption is capped in assets - buyer assets if `buy`, else seller assets (`maxAssets`).
     Assets(u128),
 }
 
@@ -123,7 +123,7 @@ pub fn consumption_headroom(offer: &Offer, consumed_so_far: u128) -> Option<u128
     Some(cap.saturating_sub(consumed_so_far))
 }
 
-/// Whether taking `amount` more (in the offer's cap unit) stays within the group cap — the
+/// Whether taking `amount` more (in the offer's cap unit) stays within the group cap - the
 /// off-chain mirror of the `ConsumedUnits` / `ConsumedAssets` checks.
 pub fn can_consume(offer: &Offer, consumed_so_far: u128, amount: u128) -> bool {
     match consumption_headroom(offer, consumed_so_far) {

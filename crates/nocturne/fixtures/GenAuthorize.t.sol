@@ -4,7 +4,7 @@
 // This is NOT part of `cargo test`. It is the authoritative oracle that produces the
 // constants baked into `tests/authorize.rs`. It builds a concrete Authorization, computes
 // the hashStruct / digest exactly as `EcrecoverAuthorizer.setIsAuthorized` does, signs it,
-// and asserts the real on-chain `setIsAuthorized` accepts the signature — then prints every
+// and asserts the real on-chain `setIsAuthorized` accepts the signature - then prints every
 // value the Rust side must reproduce.
 //
 // No stubs: the authorizer is backed by the REAL `Midnight` contract, and its forwarded
@@ -51,7 +51,7 @@ contract GenAuthorizeTest is Test {
     function test_generate() public {
         authorizer = vm.addr(PK);
         // Real EcrecoverAuthorizer backed by the real Midnight (no stub). Deployment order is
-        // Midnight first, authorizer second — identical to the previous (stub-first, authorizer-
+        // Midnight first, authorizer second - identical to the previous (stub-first, authorizer-
         // second) layout, so the authorizer address (the EIP-712 verifyingContract) is unchanged.
         Midnight midnight = new Midnight();
         authorizer_ = new EcrecoverAuthorizer(address(midnight));

@@ -6,7 +6,7 @@
 
 use crate::Word;
 
-/// 256-bit unsigned integer — the same `ruint` type alloy / reth / foundry use.
+/// 256-bit unsigned integer - the same `ruint` type alloy / reth / foundry use.
 pub use ruint::aliases::U256;
 
 /// A big-endian `uint256` word from a `U256`.

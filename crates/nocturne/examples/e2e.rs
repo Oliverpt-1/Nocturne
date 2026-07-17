@@ -1,4 +1,4 @@
-//! E2E driver — uses ONLY the nocturne tools to produce everything a real, deployed
+//! E2E driver - uses ONLY the nocturne tools to produce everything a real, deployed
 //! Midnight needs, so a shell/cast layer can submit it to anvil and check the results.
 //! Not a unit test; invoked by e2e/run.sh. Addresses come from env (the live deploy); the
 //! anvil default keys/params are baked.

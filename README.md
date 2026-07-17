@@ -7,7 +7,7 @@
 <p align="center"><em>Fast off-chain signing and offers for the Morpho Midnight protocol.</em></p>
 
 <p align="center">
-  <img src="assets/nocturne.png" alt="Nocturne — made in Rust" width="640">
+  <img src="assets/nocturne.png" alt="Nocturne - made in Rust" width="640">
 </p>
 
 ## What is Nocturne?
@@ -15,7 +15,7 @@
 **Nocturne** is a production-ready signing and offer library for the
 [Morpho Midnight](https://github.com/morpho-org/midnight) protocol, focused on speed and execution.
 It is compatible with all deployments of Midnight. Midnight is an onchain protocol by design;
-however, offers are explicitly handled offchain — which is where Nocturne operates. Every hash,
+however, offers are explicitly handled offchain - which is where Nocturne operates. Every hash,
 signature, price, and calldata layout is parity-checked byte-for-byte against the contracts
 (`cargo test`), and the full lifecycle is exercised against a real deployment on anvil.
 
@@ -45,7 +45,7 @@ Add the crate:
 nocturne = { path = "crates/nocturne" }
 ```
 
-Run the test suite (self-contained — parity constants are baked in):
+Run the test suite (self-contained - parity constants are baked in):
 
 ```sh
 cargo test              # everything, incl. parity vs the Midnight contracts
@@ -56,7 +56,7 @@ lives in [`crates/nocturne/e2e/`](crates/nocturne/e2e/) and needs Foundry plus a
 
 ## For Developers
 
-The complete API — every callable, with examples — lives in the crate docs. Browse it on
+The complete API - every callable, with examples - lives in the crate docs. Browse it on
 **[docs.rs/nocturne](https://docs.rs/nocturne)** (once published), or locally with `cargo doc --open`.
 The crate root has a copy-paste quickstart. Runnable programs are in
 [`examples/`](crates/nocturne/examples/):
@@ -81,14 +81,14 @@ for how to report vulnerabilities privately.
 
 ## Acknowledgements
 
-- [Morpho](https://github.com/morpho-org/midnight) — the Midnight protocol and contracts this
+- [Morpho](https://github.com/morpho-org/midnight) - the Midnight protocol and contracts this
   library mirrors.
-- [ruint](https://github.com/recmo/uint) / [alloy](https://github.com/alloy-rs) — the `U256`
+- [ruint](https://github.com/recmo/uint) / [alloy](https://github.com/alloy-rs) - the `U256`
   primitive.
-- [RustCrypto `k256`](https://github.com/RustCrypto/elliptic-curves) — secp256k1 signing and
+- [RustCrypto `k256`](https://github.com/RustCrypto/elliptic-curves) - secp256k1 signing and
   recovery.
 - [`tiny-keccak`](https://github.com/debris/tiny-keccak), [`rayon`](https://github.com/rayon-rs/rayon).
-- [Foundry](https://github.com/foundry-rs/foundry) — `anvil` / `forge` / `cast` power the parity
+- [Foundry](https://github.com/foundry-rs/foundry) - `anvil` / `forge` / `cast` power the parity
   fixtures and the live e2e harness.
 
 ## License

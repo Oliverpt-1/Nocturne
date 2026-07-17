@@ -3,12 +3,12 @@
 //! The expected values below come from `fixtures/GenTake.t.sol`, which runs a **real**
 //! `Midnight.take` through the full contract (rev f47568c9e45a9b70830b82a130b47393dcafec33) and
 //! reads back the resulting amounts and position deltas. This promotes `settlement_fee` /
-//! `take_amounts` / `simulate_take` from hand-verified to contract-anchored — the same standard
+//! `take_amounts` / `simulate_take` from hand-verified to contract-anchored - the same standard
 //! as the typehash, signing-digest, and tick-price parity tests.
 //!
 //! The scenario: a fresh buy offer (maker = buyer, taker = seller), tick 3372 (price 0.5 WAD),
 //! ttm = 45 days (interpolates between the 30d/90d fee breakpoints), the on-chain max settlement
-//! fee curve, and a nonzero continuous fee — so every branch (price, fee interpolation, buy-side
+//! fee curve, and a nonzero continuous fee - so every branch (price, fee interpolation, buy-side
 //! rounding, pending-fee accrual, consumption, deltas) is exercised at once.
 
 use nocturne::*;

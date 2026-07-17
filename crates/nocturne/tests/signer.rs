@@ -100,7 +100,7 @@ fn sig_from_der_matches_rs_path() {
 
 #[test]
 fn external_signer_matches_local_signer() {
-    // The closure captures a k256 key and DER-signs — standing in for a KMS/HSM backend.
+    // The closure captures a k256 key and DER-signs - standing in for a KMS/HSM backend.
     let kb = 0x8d;
     let sk = key(kb);
     let address = signer_address(&sk);

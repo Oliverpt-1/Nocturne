@@ -148,7 +148,7 @@ pub fn seller_assets_to_units(
     })
 }
 
-/// Units still takeable on `offer` given `consumed` so far — enough to fully consume it.
+/// Units still takeable on `offer` given `consumed` so far - enough to fully consume it.
 ///
 /// Mirrors `ConsumableUnitsLib.consumableUnits`. A units-capped offer (`max_units > 0`) returns
 /// `zeroFloorSub(max_units, consumed)`; otherwise it is assets-capped and the remaining

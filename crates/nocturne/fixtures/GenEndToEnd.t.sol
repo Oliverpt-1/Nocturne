@@ -4,7 +4,7 @@
 // This is NOT part of `cargo test`. It is the authoritative oracle that produces the
 // constants baked into `tests/parity_e2e.rs`. It builds a concrete 4-offer tree, computes
 // the leaf / root / signed digest exactly as `EcrecoverRatifier.isRatified` does, signs it,
-// and asserts the real on-chain `isRatified` accepts the signature — then prints every value
+// and asserts the real on-chain `isRatified` accepts the signature - then prints every value
 // the Rust side must reproduce.
 //
 // Regenerate (from the midnight contracts repo, pinned at the rev in parity_e2e.rs):

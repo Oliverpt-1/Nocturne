@@ -2,7 +2,7 @@
 # Market-making loop against a REAL Midnight on anvil, driven entirely by the SDK.
 # Proves: grid quoting (one signed tree, many rungs), full + partial fills, fair-value move ->
 # re-quote (new tree/root/sig), cancel-and-replace (old root dead, new live), and inventory
-# accounting — every fill checked against the SDK's simulate/take_amounts predictions.
+# accounting - every fill checked against the SDK's simulate/take_amounts predictions.
 set -euo pipefail
 
 RPC=http://127.0.0.1:8545

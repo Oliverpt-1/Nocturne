@@ -1,4 +1,4 @@
-# e2e — live anvil test against real Midnight
+# e2e - live anvil test against real Midnight
 
 Deploys a **real** Midnight environment on anvil (no stubs: real `Midnight`,
 `EcrecoverRatifier`, `EcrecoverAuthorizer`, real ERC20s, `Oracle`) and drives the full offer

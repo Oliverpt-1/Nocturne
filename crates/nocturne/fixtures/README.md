@@ -2,13 +2,13 @@
 
 Authoritative test vectors for `nocturne`, generated from the Midnight contracts.
 
-- `GenEndToEnd.t.sol` — builds a concrete 4-offer tree, computes the leaf / root / signed
+- `GenEndToEnd.t.sol` - builds a concrete 4-offer tree, computes the leaf / root / signed
   digest exactly as `EcrecoverRatifier.isRatified`, signs it, and asserts the **real** on-chain
   `isRatified` accepts the signature, then prints every value. These printed values are baked
   into `../tests/parity_e2e.rs`.
-- `GenSim.t.sol` — prints `TickLib.tickToPrice` for a spread of ticks; the values are baked into
+- `GenSim.t.sol` - prints `TickLib.tickToPrice` for a spread of ticks; the values are baked into
   `../tests/sim_parity.rs`.
-- `GenTake.t.sol` — extends the contracts' `BaseTest` and runs a **real** `Midnight.take`, reading
+- `GenTake.t.sol` - extends the contracts' `BaseTest` and runs a **real** `Midnight.take`, reading
   back the resulting amounts and position deltas; baked into `../tests/sim_take_parity.rs`. Because
   it imports `BaseTest.sol`, drop it in the contracts' `test/` dir to regenerate (as above).
 
@@ -26,5 +26,5 @@ cd <midnight-repo> && forge test --match-contract GenEndToEnd -vv
 rm <midnight-repo>/test/GenEndToEnd.t.sol
 ```
 
-If the contracts change the offer layout, the digest changes and `parity_e2e.rs` will fail —
+If the contracts change the offer layout, the digest changes and `parity_e2e.rs` will fail -
 that's the signal to regenerate (and bump the pinned rev here and in `parity_e2e.rs`).

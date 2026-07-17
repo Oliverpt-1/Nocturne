@@ -1,7 +1,7 @@
-//! Market-making loop driver — the SDK quotes a *grid of lend offers by APR* into one signed tree
+//! Market-making loop driver - the SDK quotes a *grid of lend offers by APR* into one signed tree
 //! and emits, per rung, the resolved tick, the realized APR, the take calldata, and predicted
 //! fills. The shell (e2e/mm.sh) drives rounds against a real Midnight on anvil: quote a grid by
-//! APR, take full + partial, move fair value, re-quote, cancel-and-replace, and check inventory —
+//! APR, take full + partial, move fair value, re-quote, cancel-and-replace, and check inventory -
 //! every fill vs the SDK's take_amounts predictions, proving APR -> tick -> price -> on-chain fill.
 //!
 //!   cargo run --example mm_loop -- grid <fair_apr> <group_base>

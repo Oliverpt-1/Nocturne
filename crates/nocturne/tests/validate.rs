@@ -177,7 +177,7 @@ fn maturity_too_far() {
     let mut o = good_offer();
     o.market.maturity = u256(4_000_000_000); // ~far future but check against now
     let mut ctx = good_ctx();
-    ctx.now = Some(1_000); // maturity is way more than 100y past now? no — 4e9-1e3 < 100y (3.15e9)? 100y ~= 3.156e9
+    ctx.now = Some(1_000); // maturity is way more than 100y past now? no - 4e9-1e3 < 100y (3.15e9)? 100y ~= 3.156e9
                            // 4_000_000_000 - 1_000 > 3_153_600_000 -> too far
     assert!(validate_offer(&o, &ctx).contains(&OfferError::MaturityTooFar));
 

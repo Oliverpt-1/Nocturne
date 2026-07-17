@@ -185,12 +185,12 @@ impl OfferBuilder {
         self.side(false)
     }
 
-    /// Shorthand for `side(true)` — a lender buys the loan (maker is the buyer).
+    /// Shorthand for `side(true)` - a lender buys the loan (maker is the buyer).
     pub fn lend(self) -> Self {
         self.side(true)
     }
 
-    /// Shorthand for `side(false)` — a borrower sells the loan (maker is the seller).
+    /// Shorthand for `side(false)` - a borrower sells the loan (maker is the seller).
     pub fn borrow(self) -> Self {
         self.side(false)
     }

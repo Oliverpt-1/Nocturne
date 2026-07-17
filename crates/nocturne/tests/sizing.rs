@@ -239,7 +239,7 @@ fn sizing_to_target_hits_target_assets() {
 }
 
 // ---------------------------------------------------------------------------
-// Error paths — must return Err, never panic
+// Error paths - must return Err, never panic
 // ---------------------------------------------------------------------------
 
 #[test]

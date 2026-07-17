@@ -1,4 +1,4 @@
-// Baseline: how a maker signs Midnight offer trees today — ethers v6, single-threaded.
+// Baseline: how a maker signs Midnight offer trees today - ethers v6, single-threaded.
 // Computes the SAME leaves/tree as the Rust crate, so its N=4 root must equal the Rust CROSSCHECK_ROOT.
 const { TypedDataEncoder, keccak256, concat, toBeHex, zeroPadValue, SigningKey } = require("ethers");
 

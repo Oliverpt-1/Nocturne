@@ -3,7 +3,7 @@
 //
 // Runs a real `Midnight.take` through the full contract and reads back the resulting amounts and
 // position deltas. The values are baked into tests/sim_take_parity.rs, which asserts
-// take_amounts / simulate_take reproduce them — promoting the take math from hand-verified to
+// take_amounts / simulate_take reproduce them - promoting the take math from hand-verified to
 // contract-anchored.
 //
 // Extends the contracts' own BaseTest to inherit market setup, tokens, the DummyRatifier, and the

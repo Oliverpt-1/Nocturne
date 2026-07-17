@@ -4,7 +4,7 @@
 //! The expected values are produced by `fixtures/GenAuthorize.t.sol`, which drives the actual
 //! `EcrecoverAuthorizer.setIsAuthorized` from the Midnight contracts repo (rev
 //! f47568c9e45a9b70830b82a130b47393dcafec33) with a fixed authorizer key and asserts the
-//! contract accepts the signature — then prints them. See that file's header to regenerate.
+//! contract accepts the signature - then prints them. See that file's header to regenerate.
 //! The constants are baked so `cargo test` stays standalone.
 
 use k256::ecdsa::SigningKey;

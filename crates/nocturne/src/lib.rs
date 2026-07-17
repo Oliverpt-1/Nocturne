@@ -8,7 +8,7 @@
 //!
 //! # Quickstart
 //!
-//! Build an offer, sign the tree, and verify it — the whole maker path:
+//! Build an offer, sign the tree, and verify it - the whole maker path:
 //!
 //! ```
 //! use nocturne::*;
@@ -36,15 +36,15 @@
 //!
 //! # What's here
 //!
-//! - **build** — [`OfferBuilder`], [`MarketBuilder`] (quote by tick/units or APR/notional)
-//! - **hash & tree** — [`hash_offer`], [`OfferTree`], [`verify_leaf`]
-//! - **sign** — [`tree_digest`], [`sign_digest`], the [`Signer`] trait ([`LocalSigner`], KMS via [`ExternalSigner`])
-//! - **verify** — [`recover`], [`verify`]
-//! - **authorize** — [`Authorization`], [`sign_authorization`] (hot-key delegation)
-//! - **validate** — [`validate_offer`] (will `take` accept this?)
-//! - **simulate** — [`tick_to_price`], [`take_amounts`], [`simulate_take`], [`apr_to_tick`] / [`tick_to_apr`]
-//! - **decode** — [`decode_offer`], [`decode_market_state`], [`decode_position`]
-//! - **encode** — [`encode_take_calldata`], [`encode_ratifier_data`], [`encode_cancel_root_calldata`]
+//! - **build** - [`OfferBuilder`], [`MarketBuilder`] (quote by tick/units or APR/notional)
+//! - **hash & tree** - [`hash_offer`], [`OfferTree`], [`verify_leaf`]
+//! - **sign** - [`tree_digest`], [`sign_digest`], the [`Signer`] trait ([`LocalSigner`], KMS via [`ExternalSigner`])
+//! - **verify** - [`recover`], [`verify`]
+//! - **authorize** - [`Authorization`], [`sign_authorization`] (hot-key delegation)
+//! - **validate** - [`validate_offer`] (will `take` accept this?)
+//! - **simulate** - [`tick_to_price`], [`take_amounts`], [`simulate_take`], [`apr_to_tick`] / [`tick_to_apr`]
+//! - **decode** - [`decode_offer`], [`decode_market_state`], [`decode_position`]
+//! - **encode** - [`encode_take_calldata`], [`encode_ratifier_data`], [`encode_cancel_root_calldata`]
 //!
 //! Runnable programs live in the crate's `examples/` directory (start with `quickstart`).
 
@@ -232,7 +232,7 @@ pub fn hash_market(m: &Market) -> Word {
     ]))
 }
 
-/// EIP-712 struct hash of an Offer — this is the Merkle leaf. Mirrors `HashLib.hashOffer`.
+/// EIP-712 struct hash of an Offer - this is the Merkle leaf. Mirrors `HashLib.hashOffer`.
 pub fn hash_offer(o: &Offer) -> Word {
     keccak(&encode(&[
         offer_typehash(),
@@ -345,7 +345,7 @@ pub struct Sig {
     pub v: u8,
 }
 
-/// Sign the tree digest with the maker's key (secp256k1, in-process — no wallet round-trip).
+/// Sign the tree digest with the maker's key (secp256k1, in-process - no wallet round-trip).
 pub fn sign_digest(sk: &SigningKey, digest: &Word) -> Sig {
     let (sig, rec): (EcdsaSig, RecoveryId) = sk.sign_prehash_recoverable(digest).expect("sign");
     let b = sig.to_bytes();
@@ -369,7 +369,7 @@ fn address_of(vk: &VerifyingKey) -> Address {
     a
 }
 
-/// The Ethereum address controlled by a signing key — the `maker` address to put in offers.
+/// The Ethereum address controlled by a signing key - the `maker` address to put in offers.
 pub fn signer_address(sk: &SigningKey) -> Address {
     address_of(sk.verifying_key())
 }

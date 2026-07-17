@@ -1,11 +1,11 @@
 //! Fuzz / property suite for `nocturne`.
 //!
 //! Two parts:
-//!  * **Part A — proptest property tests** (pure Rust): Merkle proof soundness, the full
+//!  * **Part A - proptest property tests** (pure Rust): Merkle proof soundness, the full
 //!    sign → recover → verify round-trip, `tick_to_price` range + monotonicity, and a
 //!    "never panics on adversarial input" robustness sweep over `validate_offer` /
 //!    `simulate_take` / `take_amounts`.
-//!  * **Part B — differential parity vs the real contracts**: 32 deterministically generated
+//!  * **Part B - differential parity vs the real contracts**: 32 deterministically generated
 //!    offers + ticks whose `HashLib.hashOffer` / `TickLib.tickToPrice` values are produced by
 //!    `fixtures/GenFuzz.t.sol` (run against the Midnight contracts at rev
 //!    f47568c9e45a9b70830b82a130b47393dcafec33) and baked below. The Rust generator mirrors the
@@ -15,7 +15,7 @@ use k256::ecdsa::SigningKey;
 use nocturne::*;
 use proptest::prelude::*;
 
-/// 1 WAD (1e18) — the maximum a price can reach.
+/// 1 WAD (1e18) - the maximum a price can reach.
 fn wad_u256() -> U256 {
     U256::from(1_000_000_000_000_000_000u64)
 }
@@ -60,7 +60,7 @@ fn arb_market() -> impl Strategy<Value = Market> {
         )
 }
 
-/// A fully random `Offer` — every field is arbitrary bytes. Used for hashing / signing / validation
+/// A fully random `Offer` - every field is arbitrary bytes. Used for hashing / signing / validation
 /// where the code path never does unbounded arithmetic, so full-range values are safe.
 fn arb_offer() -> impl Strategy<Value = Offer> {
     (
@@ -135,7 +135,7 @@ fn arb_pow2_leaves() -> impl Strategy<Value = Vec<Word>> {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Part A — property tests
+// Part A - property tests
 // ------------------------------------------------------------------------------------------------
 
 proptest! {
@@ -296,7 +296,7 @@ proptest! {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Part B — differential parity vs the real contracts (see fixtures/GenFuzz.t.sol)
+// Part B - differential parity vs the real contracts (see fixtures/GenFuzz.t.sol)
 // ------------------------------------------------------------------------------------------------
 
 /// `(HashLib.hashOffer(offer_i), TickLib.tickToPrice(tick_i))` for i in 0..32, emitted by
@@ -442,12 +442,12 @@ fn hx32(s: &str) -> Word {
     w
 }
 
-/// `seed_i = keccak256(abi.encode(uint256(i)))` — keccak of the 32-byte big-endian of `i`.
+/// `seed_i = keccak256(abi.encode(uint256(i)))` - keccak of the 32-byte big-endian of `i`.
 fn seed(i: u64) -> Word {
     keccak(&u256_to_word(U256::from(i)))
 }
 
-/// `seed2_i = keccak256(abi.encode(seed_i))` — keccak of the 32 bytes of `seed_i`.
+/// `seed2_i = keccak256(abi.encode(seed_i))` - keccak of the 32 bytes of `seed_i`.
 fn seed2(i: u64) -> Word {
     keccak(&seed(i))
 }
@@ -458,7 +458,7 @@ fn tick_of(i: u64) -> u64 {
     u64::try_from(m).unwrap()
 }
 
-/// Low 20 bytes of a word — `address(uint160(x))`.
+/// Low 20 bytes of a word - `address(uint160(x))`.
 fn addr_of_u256(x: U256) -> Address {
     let w = u256_to_word(x);
     let mut a = [0u8; 20];
@@ -466,7 +466,7 @@ fn addr_of_u256(x: U256) -> Address {
     a
 }
 
-/// Low 16 bytes of a word — `uint128(uint256(x))`.
+/// Low 16 bytes of a word - `uint128(uint256(x))`.
 fn u128_trunc(w: &Word) -> u128 {
     let mut b = [0u8; 16];
     b.copy_from_slice(&w[16..]);
