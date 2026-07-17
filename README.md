@@ -18,7 +18,7 @@ offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol
 Designed for market makers, trading firms, integrators, and protocol developers, Nocturne provides
 the off-chain infrastructure needed to quote markets, generate Merkle trees, sign offers, simulate
 execution, and interact with Midnight with minimal latency. While Midnight settles credit onchain,
-offers are created and managed offchain—where Nocturne operates.
+offers are created and managed offchain, where Nocturne operates.
 
 Every hash, signature, price calculation, and calldata layout is parity-checked byte-for-byte
 against the protocol contracts (`cargo test`), and the full offer lifecycle is exercised against a
