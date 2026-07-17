@@ -1,8 +1,52 @@
-//! Nocturne — off-chain offer-tree hashing, Merkle proofs and EIP-712 signing for Morpho Midnight.
+//! Off-chain Rust SDK for the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol:
+//! EIP-712 offer hashing, Merkle trees, signing, simulation, decoding, and calldata encoding.
 //!
-//! Byte-for-byte mirror of `src/ratifiers/libraries/HashLib.sol` and the digest built in
-//! `EcrecoverRatifier.isRatified`. Parity is asserted in tests against the on-chain typehash
-//! constants, so a maker can sign locally and any taker's `take(...)` will pass `isRatified`.
+//! Every hash, signature, price, and calldata layout is a byte-for-byte mirror of the Midnight
+//! contracts (`HashLib`, `TickLib`, `EcrecoverRatifier`, `EcrecoverAuthorizer`, `TakeAmountsLib`),
+//! verified against them in tests, so a maker can build and sign locally and a taker's `take(...)`
+//! will pass on-chain.
+//!
+//! # Quickstart
+//!
+//! Build an offer, sign the tree, and verify it — the whole maker path:
+//!
+//! ```
+//! use nocturne::*;
+//!
+//! let signer = LocalSigner::from_bytes(&[0x42u8; 32]).unwrap();
+//! let maker = signer.address();
+//! let ratifier = [0xbb; 20];
+//! let chain_id = word_from_u64(1);
+//!
+//! // build a market and a "lend at 7.2% APR" offer
+//! let market = MarketBuilder::new(1, [0x11; 20], [0x22; 20])
+//!     .collateral([0x33; 20], U256::from(770_000_000_000_000_000u64), U256::from(1u64), [0x44; 20])
+//!     .maturity(2_000_000_000)
+//!     .build();
+//! let offer = OfferBuilder::new(market, maker)
+//!     .lend().apr(7.2, 1_700_000_000).expiry(2_000_000_000).ratifier(ratifier).max_units(1_000_000)
+//!     .build_checked().unwrap();
+//!
+//! // hash into a one-leaf tree, sign the root, verify it will ratify
+//! let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+//! let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
+//! let sig = signer.sign_digest(&digest).unwrap();
+//! assert!(verify(&offer, &tree.root(), 0, &tree.proof(0), &sig, chain_id, &ratifier, &maker));
+//! ```
+//!
+//! # What's here
+//!
+//! - **build** — [`OfferBuilder`], [`MarketBuilder`] (quote by tick/units or APR/notional)
+//! - **hash & tree** — [`hash_offer`], [`OfferTree`], [`verify_leaf`]
+//! - **sign** — [`tree_digest`], [`sign_digest`], the [`Signer`] trait ([`LocalSigner`], KMS via [`ExternalSigner`])
+//! - **verify** — [`recover`], [`verify`]
+//! - **authorize** — [`Authorization`], [`sign_authorization`] (hot-key delegation)
+//! - **validate** — [`validate_offer`] (will `take` accept this?)
+//! - **simulate** — [`tick_to_price`], [`take_amounts`], [`simulate_take`], [`apr_to_tick`] / [`tick_to_apr`]
+//! - **decode** — [`decode_offer`], [`decode_market_state`], [`decode_position`]
+//! - **encode** — [`encode_take_calldata`], [`encode_ratifier_data`], [`encode_cancel_root_calldata`]
+//!
+//! Runnable programs live in the crate's `examples/` directory (start with `quickstart`).
 
 use k256::ecdsa::{RecoveryId, Signature as EcdsaSig, SigningKey, VerifyingKey};
 use tiny_keccak::{Hasher, Keccak};
