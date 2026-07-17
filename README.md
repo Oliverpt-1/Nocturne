@@ -4,6 +4,8 @@
 
 *Fast off-chain signing and offers for the Morpho Midnight protocol.*
 
+![Uploading Nocturne Image.png…]()
+
 [![CI](https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
