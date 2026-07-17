@@ -1,8 +1,25 @@
+<!-- TODO: add a banner image here, e.g. ![Nocturne](assets/nocturne.png) -->
+
 # Nocturne
 
-Off-chain Rust tooling for [Morpho Midnight](https://github.com/morpho-org/midnight) — a
-byte-for-byte mirror of Midnight's EIP-712 offer signing and `take` math. Every hash, signature,
-price, and calldata layout is parity-checked against the contracts (`cargo test`).
+*Fast off-chain signing and offers for the Morpho Midnight protocol.*
+
+[![CI](https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
+## What is Nocturne?
+
+**Nocturne** is a production-ready signing and offer library for the
+[Morpho Midnight](https://github.com/morpho-org/midnight) protocol, focused on speed and execution.
+It is compatible with all deployments of Midnight. Midnight is an onchain protocol by design;
+however, offers are explicitly handled offchain — which is where Nocturne operates. Every hash,
+signature, price, and calldata layout is parity-checked byte-for-byte against the contracts
+(`cargo test`), and the full lifecycle is exercised against a real deployment on anvil.
+
+Built and operated by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
+
+> **Note:** This project is **not** endorsed by, nor affiliated with, Morpho Labs or its
+> subsidiaries.
 
 ```toml
 [dependencies]
@@ -157,3 +174,13 @@ cargo run --release --example bench
 ```sh
 cargo test              # everything, incl. parity vs the Midnight contracts
 ```
+
+## Security
+
+`nocturne` produces signatures and calldata that move real value. See [SECURITY.md](SECURITY.md)
+for how to report vulnerabilities privately.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
