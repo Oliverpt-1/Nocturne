@@ -7,7 +7,7 @@
 <p align="center"><em>Fast off-chain signing and offers for the Morpho Midnight protocol.</em></p>
 
 <p align="center">
-  <img src="assets/nocturne.png" alt="Nocturne - made in Rust" width="640">
+  <img src="assets/nocturne.png" alt="Nocturne - made in Rust" width="100%">
 </p>
 
 ## What is Nocturne?
@@ -57,7 +57,7 @@ The crate root has a copy-paste quickstart. Runnable programs are in
 
 ```sh
 cargo run --example quickstart       # build an offer -> sign the tree -> verify it ratifies
-cargo run --release --example bench  # re-quote pipeline benchmark vs the ethers baseline
+cargo run --release --example bench  # re-quote pipeline benchmark (hash -> tree -> proofs -> sign)
 ```
 
 ## Correctness
