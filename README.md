@@ -6,11 +6,11 @@ price, and calldata layout is parity-checked against the contracts (`cargo test`
 
 ```toml
 [dependencies]
-nocturne-offers = { path = "crates/nocturne-offers" }
+nocturne = { path = "crates/nocturne" }
 ```
 
 ```rust
-use nocturne_offers::*;
+use nocturne::*;
 ```
 
 `Word = [u8; 32]`, `Address = [u8; 20]`. On-chain `uint256`s are big-endian `Word`s; typed APIs
@@ -149,7 +149,7 @@ Times the re-quote pipeline (hash → tree → proofs → sign) single-threaded 
 against the ethers baseline.
 
 ```sh
-cargo run --release --bin bench
+cargo run --release --example bench
 ```
 
 ---
