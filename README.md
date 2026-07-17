@@ -36,7 +36,7 @@ security-audited. Verify against your own deployment before relying on it with r
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
 - Open a [GitHub issue](https://github.com/Oliverpt-1/midnight-rust/issues) for bugs and features.
 
-## For Users
+## Usage
 
 Add the crate:
 
@@ -44,17 +44,6 @@ Add the crate:
 [dependencies]
 nocturne = { path = "crates/nocturne" }
 ```
-
-Run the test suite (self-contained - parity constants are baked in):
-
-```sh
-cargo test              # everything, incl. parity vs the Midnight contracts
-```
-
-The live anvil end-to-end harness (deploy real Midnight, place trades, run the market-making loop)
-lives in [`crates/nocturne/e2e/`](crates/nocturne/e2e/) and needs Foundry plus a Midnight checkout.
-
-## For Developers
 
 The complete API - every callable, with examples - lives in the crate docs. Browse it on
 **[docs.rs/nocturne](https://docs.rs/nocturne)** (once published), or locally with `cargo doc --open`.
@@ -73,6 +62,13 @@ contracts, and the full lifecycle is exercised on a live anvil deployment. Solid
 generate the vectors; the constants are baked into the Rust tests so `cargo test` stays
 self-contained. See [`crates/nocturne/fixtures/`](crates/nocturne/fixtures/) and
 [`crates/nocturne/e2e/`](crates/nocturne/e2e/).
+
+```sh
+cargo test                           # unit + parity vs the Midnight contracts (self-contained)
+```
+
+The live anvil end-to-end harness (deploy real Midnight, place trades, run the market-making loop)
+lives in [`crates/nocturne/e2e/`](crates/nocturne/e2e/) and needs Foundry plus a Midnight checkout.
 
 ## Security
 
