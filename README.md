@@ -12,14 +12,19 @@
 
 ## What is Nocturne?
 
-**Nocturne** is a fast, well-tested signing and offer library for the
-[Morpho Midnight](https://github.com/morpho-org/midnight) protocol, focused on speed and execution.
-It is compatible with all deployments of Midnight. Midnight is an onchain protocol by design;
-however, offers are explicitly handled offchain - which is where Nocturne operates. Every hash,
-signature, price, and calldata layout is parity-checked byte-for-byte against the contracts
-(`cargo test`), and the full lifecycle is exercised against a real deployment on anvil.
+**Nocturne** is a high-performance Rust library for building, signing, validating, and executing
+offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol.
 
-Built and operated by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
+Designed for market makers, trading firms, integrators, and protocol developers, Nocturne provides
+the off-chain infrastructure needed to quote markets, generate Merkle trees, sign offers, simulate
+execution, and interact with Midnight with minimal latency. While Midnight settles credit onchain,
+offers are created and managed offchain—where Nocturne operates.
+
+Every hash, signature, price calculation, and calldata layout is parity-checked byte-for-byte
+against the protocol contracts (`cargo test`), and the full offer lifecycle is exercised against a
+real Anvil deployment.
+
+Built and maintained by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
 
 > **Note:** This project is **not** endorsed by, nor affiliated with, Morpho Labs or its
 > subsidiaries.
