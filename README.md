@@ -26,7 +26,7 @@ Built and operated by Oliver Tipton, and licensed under the Apache-2.0 and MIT l
 
 ## Status
 
-Early but well-tested. Nocturne is parity-checked byte-for-byte against the Midnight contracts and
+This is v1.0 of Nocturne, so early stages. Nocturne is parity-checked byte-for-byte against the Midnight contracts and
 exercised end-to-end on a live anvil deployment, but it has **not** been independently
 security-audited. Verify against your own deployment before relying on it with real value, and see
 [SECURITY.md](SECURITY.md) to report issues.
