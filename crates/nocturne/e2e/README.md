@@ -6,8 +6,9 @@ lifecycle using only the `nocturne` tools, asserting the chain accepts every art
 that on-chain state matches the tools' predictions.
 
 ```sh
-# needs anvil + cast + forge (Foundry) on PATH
-crates/nocturne/e2e/run.sh
+# needs anvil + cast + forge (Foundry) on PATH; point MIDNIGHT_REPO at a
+# morpho-org/midnight checkout (rev f47568c9)
+MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/run.sh
 ```
 
 Every tool is exercised through the live node (15 checks):
@@ -31,7 +32,7 @@ The settlement fee is non-zero but the market maturity is far enough out that th
 ## Market-making loop
 
 ```sh
-crates/nocturne/e2e/mm.sh
+MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/mm.sh
 ```
 
 A full MM lifecycle against real Midnight, driven by the SDK (`../examples/mm_loop.rs`,

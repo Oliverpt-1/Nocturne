@@ -12,7 +12,7 @@ ACCOUNT0=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 GROUP=0x0000000000000000000000000000000000000000000000000000000000000001
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
-MID="/Users/olivertipton/Desktop/Morpho/core contracts/midnight"
+MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a morpho-org/midnight checkout at rev f47568c9}"
 PASS=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; exit 1; }
