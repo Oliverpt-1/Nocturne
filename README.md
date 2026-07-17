@@ -60,21 +60,6 @@ cargo run --example quickstart       # build an offer -> sign the tree -> verify
 cargo run --release --example bench  # re-quote pipeline benchmark (hash -> tree -> proofs -> sign)
 ```
 
-## Correctness
-
-Every hash, signature, price, and calldata layout is checked byte-for-byte against the Midnight
-contracts, and the full lifecycle is exercised on a live anvil deployment. Solidity fixtures
-generate the vectors; the constants are baked into the Rust tests so `cargo test` stays
-self-contained. See [`crates/nocturne/fixtures/`](crates/nocturne/fixtures/) and
-[`crates/nocturne/e2e/`](crates/nocturne/e2e/).
-
-```sh
-cargo test                           # unit + parity vs the Midnight contracts (self-contained)
-```
-
-The live anvil end-to-end harness (deploy real Midnight, place trades, run the market-making loop)
-lives in [`crates/nocturne/e2e/`](crates/nocturne/e2e/) and needs Foundry plus a Midnight checkout.
-
 ## Security
 
 `nocturne` produces signatures and calldata that move real value. See [SECURITY.md](SECURITY.md)
