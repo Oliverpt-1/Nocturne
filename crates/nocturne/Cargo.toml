@@ -2,7 +2,15 @@
 name = "nocturne"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.82"
 description = "Off-chain Rust SDK for Morpho Midnight: EIP-712 offer hashing, Merkle trees, signing, simulation, decoding, and calldata encoding."
+authors = ["Oliver Tipton <oliver@morpho.xyz>"]
+license = "MIT"
+repository = "https://github.com/Oliverpt-1/midnight-rust"
+homepage = "https://github.com/Oliverpt-1/midnight-rust"
+readme = "../../README.md"
+keywords = ["ethereum", "eip712", "morpho", "midnight", "defi"]
+categories = ["cryptography::cryptocurrencies", "finance", "encoding"]
 
 [dependencies]
 tiny-keccak = { version = "2.0", features = ["keccak"] }
