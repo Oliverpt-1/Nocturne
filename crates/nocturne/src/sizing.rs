@@ -20,7 +20,7 @@
 //! a degenerate zero price yields an error instead of a division-by-zero panic; on-chain that path
 //! reverts too).
 
-use crate::{word_to_u128, word_to_u256, settlement_fee, tick_to_price, Offer, SimError, U256};
+use crate::{settlement_fee, tick_to_price, word_to_u128, word_to_u256, Offer, SimError, U256};
 
 const WAD: u128 = 1_000_000_000_000_000_000; // 1e18
 

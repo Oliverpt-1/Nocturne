@@ -42,7 +42,11 @@ fn sig_from_rs_recovers_v_across_keys_and_digests() {
     for kb in [0x01u8, 0x11, 0x42, 0x77, 0x9c, 0xfe] {
         let sk = key(kb);
         let expected = signer_address(&sk);
-        for ds in [b"digest one".as_slice(), b"digest two", b"another digest payload"] {
+        for ds in [
+            b"digest one".as_slice(),
+            b"digest two",
+            b"another digest payload",
+        ] {
             let d = digest(ds);
             let full = sign_digest(&sk, &d);
             // Discard v; reconstruct purely from (r, s) + the known address.
@@ -115,7 +119,10 @@ fn external_signer_matches_local_signer() {
     let loc_sig = local.sign_digest(&d).unwrap();
 
     assert_eq!(external.address(), local.address());
-    assert_eq!(ext_sig, loc_sig, "external and local must produce the same r/s/v");
+    assert_eq!(
+        ext_sig, loc_sig,
+        "external and local must produce the same r/s/v"
+    );
     assert_eq!(recover(&d, &ext_sig).as_ref(), Some(&address));
 }
 

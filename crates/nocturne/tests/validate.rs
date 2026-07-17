@@ -112,13 +112,16 @@ fn buy_offer_must_have_zero_maker_receiver() {
     let mut o = good_offer();
     o.buy = true;
     o.receiver_if_maker_is_seller = [0x99; 20];
-    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::UnusedReceiverMustBeZero));
+    assert!(
+        validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::UnusedReceiverMustBeZero)
+    );
 
     // A sell offer may set it.
     let mut o = good_offer();
     o.buy = false;
     o.receiver_if_maker_is_seller = [0x99; 20];
-    assert!(!validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::UnusedReceiverMustBeZero));
+    assert!(!validate_offer(&o, &ValidateCtx::default())
+        .contains(&OfferError::UnusedReceiverMustBeZero));
 }
 
 #[test]
@@ -132,14 +135,16 @@ fn collateral_structure() {
     let mut o = good_offer();
     let cp = o.market.collateral_params[0].clone();
     o.market.collateral_params.push(cp);
-    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::CollateralParamsNotSorted));
+    assert!(validate_offer(&o, &ValidateCtx::default())
+        .contains(&OfferError::CollateralParamsNotSorted));
 
     // Properly sorted two-collateral market is fine.
     let mut o = good_offer();
     let mut cp2 = o.market.collateral_params[0].clone();
     cp2.token = [0x66; 20]; // > 0x33
     o.market.collateral_params.push(cp2);
-    assert!(!validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::CollateralParamsNotSorted));
+    assert!(!validate_offer(&o, &ValidateCtx::default())
+        .contains(&OfferError::CollateralParamsNotSorted));
 }
 
 #[test]
@@ -173,7 +178,7 @@ fn maturity_too_far() {
     o.market.maturity = u256(4_000_000_000); // ~far future but check against now
     let mut ctx = good_ctx();
     ctx.now = Some(1_000); // maturity is way more than 100y past now? no — 4e9-1e3 < 100y (3.15e9)? 100y ~= 3.156e9
-    // 4_000_000_000 - 1_000 > 3_153_600_000 -> too far
+                           // 4_000_000_000 - 1_000 > 3_153_600_000 -> too far
     assert!(validate_offer(&o, &ctx).contains(&OfferError::MaturityTooFar));
 
     // Within horizon.
@@ -188,22 +193,38 @@ fn market_snapshot_checks() {
 
     // Tick not a multiple of spacing.
     let mut ctx = good_ctx();
-    ctx.market = Some(MarketSnapshot { tick_spacing: 3, loss_factor_maxed: false, continuous_fee: 100 });
+    ctx.market = Some(MarketSnapshot {
+        tick_spacing: 3,
+        loss_factor_maxed: false,
+        continuous_fee: 100,
+    });
     assert!(validate_offer(&o, &ctx).contains(&OfferError::TickNotAccessible));
 
     // Loss factor maxed.
     let mut ctx = good_ctx();
-    ctx.market = Some(MarketSnapshot { tick_spacing: 4, loss_factor_maxed: true, continuous_fee: 100 });
+    ctx.market = Some(MarketSnapshot {
+        tick_spacing: 4,
+        loss_factor_maxed: true,
+        continuous_fee: 100,
+    });
     assert!(validate_offer(&o, &ctx).contains(&OfferError::MarketLossFactorMaxedOut));
 
     // Continuous fee above the offer's cap.
     let mut ctx = good_ctx();
-    ctx.market = Some(MarketSnapshot { tick_spacing: 4, loss_factor_maxed: false, continuous_fee: 101 });
+    ctx.market = Some(MarketSnapshot {
+        tick_spacing: 4,
+        loss_factor_maxed: false,
+        continuous_fee: 101,
+    });
     assert!(validate_offer(&o, &ctx).contains(&OfferError::ContinuousFeeAboveOfferCap));
 
     // Fee exactly at cap is allowed (contract uses <=).
     let mut ctx = good_ctx();
-    ctx.market = Some(MarketSnapshot { tick_spacing: 4, loss_factor_maxed: false, continuous_fee: 100 });
+    ctx.market = Some(MarketSnapshot {
+        tick_spacing: 4,
+        loss_factor_maxed: false,
+        continuous_fee: 100,
+    });
     assert!(!validate_offer(&o, &ctx).contains(&OfferError::ContinuousFeeAboveOfferCap));
 }
 

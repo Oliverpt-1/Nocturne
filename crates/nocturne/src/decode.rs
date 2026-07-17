@@ -9,9 +9,7 @@
 //!
 //! Malformed input never panics: every path returns a [`DecodeError`].
 
-use crate::{
-    Address, CollateralParams, Market, MarketSnapshot, Offer, Position, SimMarket, Word,
-};
+use crate::{Address, CollateralParams, Market, MarketSnapshot, Offer, Position, SimMarket, Word};
 
 /// Failure decoding ABI-encoded offer or state bytes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -44,7 +42,10 @@ pub enum DecodeError {
 fn word_at(bytes: &[u8], off: usize) -> Result<Word, DecodeError> {
     let end = off.checked_add(32).ok_or(DecodeError::BadOffset(off))?;
     if end > bytes.len() {
-        return Err(DecodeError::TooShort { needed: end, have: bytes.len() });
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
     }
     let mut w = [0u8; 32];
     w.copy_from_slice(&bytes[off..end]);
@@ -105,7 +106,8 @@ fn word_to_small(w: &Word, n: usize) -> Result<u64, DecodeError> {
 
 /// Absolute offset of a dynamic field: `base + offset_word` with overflow checks.
 fn resolve(base: usize, offset: usize) -> Result<usize, DecodeError> {
-    base.checked_add(offset).ok_or(DecodeError::BadOffset(offset))
+    base.checked_add(offset)
+        .ok_or(DecodeError::BadOffset(offset))
 }
 
 // ---- offer decoding ----------------------------------------------------------
@@ -197,14 +199,22 @@ fn decode_collateral_params(
     let elems_base = resolve(base, 32)?;
     // Guard against an absurd length before allocating.
     let span = len.checked_mul(128).ok_or(DecodeError::BadLength(len))?;
-    let end = elems_base.checked_add(span).ok_or(DecodeError::BadLength(len))?;
+    let end = elems_base
+        .checked_add(span)
+        .ok_or(DecodeError::BadLength(len))?;
     if end > bytes.len() {
-        return Err(DecodeError::TooShort { needed: end, have: bytes.len() });
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
     }
 
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
-        let cp_base = resolve(elems_base, i.checked_mul(128).ok_or(DecodeError::BadLength(len))?)?;
+        let cp_base = resolve(
+            elems_base,
+            i.checked_mul(128).ok_or(DecodeError::BadLength(len))?,
+        )?;
         out.push(CollateralParams {
             token: word_to_address(&head_word(bytes, cp_base, 0)?),
             lltv: head_word(bytes, cp_base, 1)?,
@@ -221,7 +231,10 @@ fn decode_bytes(bytes: &[u8], base: usize) -> Result<Vec<u8>, DecodeError> {
     let start = resolve(base, 32)?;
     let end = start.checked_add(len).ok_or(DecodeError::BadLength(len))?;
     if end > bytes.len() {
-        return Err(DecodeError::TooShort { needed: end, have: bytes.len() });
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
     }
     Ok(bytes[start..end].to_vec())
 }

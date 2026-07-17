@@ -73,6 +73,9 @@ fn merkle_proof_roundtrips() {
     let leaves: Vec<Word> = (0u8..8).map(|i| keccak(&[i])).collect();
     let tree = OfferTree::build(leaves.clone()).unwrap();
     for (i, leaf) in leaves.iter().enumerate() {
-        assert!(verify_leaf(&tree.root(), leaf, i, &tree.proof(i)), "leaf {i}");
+        assert!(
+            verify_leaf(&tree.root(), leaf, i, &tree.proof(i)),
+            "leaf {i}"
+        );
     }
 }

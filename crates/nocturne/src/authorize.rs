@@ -38,7 +38,13 @@ impl Authorization {
         nonce: U256,
         deadline: U256,
     ) -> Self {
-        Authorization { authorizer, authorized, is_authorized, nonce, deadline }
+        Authorization {
+            authorizer,
+            authorized,
+            is_authorized,
+            nonce,
+            deadline,
+        }
     }
 }
 

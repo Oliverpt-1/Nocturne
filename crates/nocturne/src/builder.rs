@@ -58,7 +58,13 @@ impl MarketBuilder {
     }
 
     /// Append a collateral option. Add these in ascending `token` order.
-    pub fn collateral(mut self, token: Address, lltv: U256, liquidation_cursor: U256, oracle: Address) -> Self {
+    pub fn collateral(
+        mut self,
+        token: Address,
+        lltv: U256,
+        liquidation_cursor: U256,
+        oracle: Address,
+    ) -> Self {
         self.collateral_params.push(CollateralParams {
             token,
             lltv: u256_to_word(lltv),

@@ -23,3 +23,11 @@ serde = { version = "1", features = ["derive"] }
 [dev-dependencies]
 serde_json = "1"
 proptest = "1"
+
+[lints.clippy]
+# These lints suggest newer stdlib methods (is_multiple_of on 1.87, repeat_n/div_ceil) that would
+# raise our MSRV, or restyle test helpers; the manual forms are intentional.
+manual_is_multiple_of = "allow"
+manual_repeat_n = "allow"
+manual_div_ceil = "allow"
+needless_range_loop = "allow"

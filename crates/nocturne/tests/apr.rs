@@ -49,7 +49,11 @@ fn price_to_tick_matches_contract_exactly() {
             "price_to_tick({price})"
         );
         // The returned tick's price matches the contract's tickToPrice(tick).
-        assert_eq!(tick_to_price(tick).unwrap(), u256(tick_price), "tick_to_price({tick})");
+        assert_eq!(
+            tick_to_price(tick).unwrap(),
+            u256(tick_price),
+            "tick_to_price({tick})"
+        );
     }
 }
 
@@ -58,7 +62,11 @@ fn apr_chain_matches_contract_exactly() {
     for &(apr, ttm, tick, tick_price) in APR_CHAIN {
         let t = apr_to_tick(apr, ttm, SPACING).unwrap();
         assert_eq!(t, tick, "apr_to_tick({apr}, {ttm})");
-        assert_eq!(tick_to_price(t).unwrap(), u256(tick_price), "tick price for apr {apr}");
+        assert_eq!(
+            tick_to_price(t).unwrap(),
+            u256(tick_price),
+            "tick price for apr {apr}"
+        );
         // The tick is accessible (aligned to spacing).
         assert_eq!(t % SPACING, 0, "tick {t} aligned to spacing");
     }
@@ -93,7 +101,10 @@ fn round_trip_from_apr_within_one_spacing_step() {
         let diff = (t2 as i64 - t1 as i64).abs();
         assert!(diff <= SPACING as i64, "apr={apr} t1={t1} t2={t2}");
         // Realized APR never exceeds the target (snap raises price, lowers rate).
-        assert!(apr_back <= apr + 1e-9, "realized apr {apr_back} exceeds target {apr}");
+        assert!(
+            apr_back <= apr + 1e-9,
+            "realized apr {apr_back} exceeds target {apr}"
+        );
     }
 }
 
@@ -104,7 +115,10 @@ fn higher_apr_gives_lower_tick_and_price() {
     let t10 = apr_to_tick(10.0, ttm, SPACING).unwrap();
     let t15 = apr_to_tick(15.0, ttm, SPACING).unwrap();
     // Higher APR -> lower price -> lower tick.
-    assert!(t15 < t10 && t10 < t5, "expected 15%<10%<5% ticks, got {t15} {t10} {t5}");
+    assert!(
+        t15 < t10 && t10 < t5,
+        "expected 15%<10%<5% ticks, got {t15} {t10} {t5}"
+    );
     assert!(tick_to_price(t15).unwrap() < tick_to_price(t5).unwrap());
 }
 
@@ -114,7 +128,10 @@ fn tick_to_apr_is_decreasing_in_tick() {
     let mut prev = f64::INFINITY;
     for tick in (100u64..=6000).step_by(200) {
         let apr = tick_to_apr(tick, ttm).unwrap();
-        assert!(apr < prev, "apr should decrease with tick: tick={tick} apr={apr} prev={prev}");
+        assert!(
+            apr < prev,
+            "apr should decrease with tick: tick={tick} apr={apr} prev={prev}"
+        );
         prev = apr;
     }
 }
@@ -129,7 +146,10 @@ fn error_paths() {
     // Zero time-to-maturity cannot be annualized.
     assert_eq!(tick_to_apr(3976, 0), Err(SimError::ZeroTimeToMaturity));
     // Out-of-range tick propagates from tick_to_price.
-    assert!(matches!(tick_to_apr(MAX_TICK + 1, 31_536_000), Err(SimError::TickOutOfRange(_))));
+    assert!(matches!(
+        tick_to_apr(MAX_TICK + 1, 31_536_000),
+        Err(SimError::TickOutOfRange(_))
+    ));
 }
 
 // ---- Builder ergonomics ----
@@ -143,7 +163,12 @@ const NOW: u64 = MATURITY - 31_536_000;
 
 fn a_market() -> Market {
     MarketBuilder::new(1, MIDNIGHT, LOAN)
-        .collateral([0x33; 20], u256(860_000_000_000_000_000), U256::from(1u64), [0x44; 20])
+        .collateral(
+            [0x33; 20],
+            u256(860_000_000_000_000_000),
+            U256::from(1u64),
+            [0x44; 20],
+        )
         .maturity(MATURITY)
         .rcf_threshold(U256::from(1000u64))
         .build()
@@ -202,7 +227,10 @@ fn builder_does_not_panic_on_extreme_apr() {
         .assets(1_000_000, NOW, cbps)
         .ratifier(RATIFIER)
         .build_checked();
-    assert!(res.is_ok(), "high APR still yields a valid accessible tick: {res:?}");
+    assert!(
+        res.is_ok(),
+        "high APR still yields a valid accessible tick: {res:?}"
+    );
 }
 
 #[test]

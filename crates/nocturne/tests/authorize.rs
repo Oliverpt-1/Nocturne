@@ -18,7 +18,8 @@ const AUTHORIZED: &str = "0x2222222222222222222222222222222222222222";
 const IS_AUTHORIZED: bool = true;
 const NONCE: u64 = 0;
 const DEADLINE: u64 = 2_000_000_000;
-const EXPECT_HASHSTRUCT: &str = "0x02fb240d0d7687f2eed977c66ad50dbca50f6a99c90ef30ba355c4c0617d5a54";
+const EXPECT_HASHSTRUCT: &str =
+    "0x02fb240d0d7687f2eed977c66ad50dbca50f6a99c90ef30ba355c4c0617d5a54";
 const EXPECT_DIGEST: &str = "0xdb54bbfe5a0580f55767dd4d3ce8e721427fe7b01985c65f0fa9179fa3f045a9";
 const SIG_R: &str = "0xec7d9f6dc496c805eff6053c28221ba98d85aba16d4a418b6d29e513366311fd";
 const SIG_S: &str = "0x0711d5de9b77f131e3825ca507e23ee9a4c5f88a0739f881d0d475abf073e3e9";
@@ -82,13 +83,21 @@ fn hash_struct_matches_the_authorizer() {
 fn digest_matches_the_authorizer() {
     let a = fixture_authorization();
     let digest = authorization_digest(&a, u256_word(CHAIN_ID), &hx20(AUTHORIZER_CONTRACT));
-    assert_eq!(digest, hx32(EXPECT_DIGEST), "digest mismatch vs EcrecoverAuthorizer assembly");
+    assert_eq!(
+        digest,
+        hx32(EXPECT_DIGEST),
+        "digest mismatch vs EcrecoverAuthorizer assembly"
+    );
 }
 
 #[test]
 fn recovered_signer_is_the_authorizer() {
     let a = fixture_authorization();
-    let sig = Sig { r: hx32(SIG_R), s: hx32(SIG_S), v: SIG_V };
+    let sig = Sig {
+        r: hx32(SIG_R),
+        s: hx32(SIG_S),
+        v: SIG_V,
+    };
     assert_eq!(
         recover_authorization(&a, u256_word(CHAIN_ID), &hx20(AUTHORIZER_CONTRACT), &sig),
         Some(hx20(AUTHORIZER)),

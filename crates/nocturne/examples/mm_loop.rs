@@ -28,26 +28,54 @@ const fn hexlit(s: &str) -> [u8; 32] {
     let b = s.as_bytes();
     let mut out = [0u8; 32];
     let mut i = 0;
-    while i < 32 { out[i] = (hv(b[2 * i]) << 4) | hv(b[2 * i + 1]); i += 1; }
+    while i < 32 {
+        out[i] = (hv(b[2 * i]) << 4) | hv(b[2 * i + 1]);
+        i += 1;
+    }
     out
 }
-const fn hv(c: u8) -> u8 { match c { b'0'..=b'9' => c - b'0', b'a'..=b'f' => c - b'a' + 10, _ => 0 } }
+const fn hv(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        _ => 0,
+    }
+}
 
-fn env_addr(k: &str) -> Address { addr(std::env::var(k).unwrap().trim_start_matches("0x")) }
-fn addr(s: &str) -> Address { let mut a = [0u8; 20]; for i in 0..20 { a[i] = u8::from_str_radix(&s[2*i..2*i+2], 16).unwrap(); } a }
-fn hx(b: &[u8]) -> String { let mut s = String::from("0x"); for x in b { s.push_str(&format!("{x:02x}")); } s }
+fn env_addr(k: &str) -> Address {
+    addr(std::env::var(k).unwrap().trim_start_matches("0x"))
+}
+fn addr(s: &str) -> Address {
+    let mut a = [0u8; 20];
+    for i in 0..20 {
+        a[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
+    }
+    a
+}
+fn hx(b: &[u8]) -> String {
+    let mut s = String::from("0x");
+    for x in b {
+        s.push_str(&format!("{x:02x}"));
+    }
+    s
+}
 
 fn market() -> Market {
     MarketBuilder::new(CHAIN_ID, env_addr("MIDNIGHT"), env_addr("LOAN"))
-        .collateral(env_addr("COLLATERAL"), U256::from(LLTV), U256::from(CURSOR), env_addr("ORACLE"))
+        .collateral(
+            env_addr("COLLATERAL"),
+            U256::from(LLTV),
+            U256::from(CURSOR),
+            env_addr("ORACLE"),
+        )
         .maturity(MATURITY)
         .build()
 }
 
 fn rung(maker: Address, ratifier: Address, apr: f64, group: u64) -> Offer {
     OfferBuilder::new(market(), maker)
-        .lend()               // maker lends: buys credit
-        .apr(apr, NOW)        // APR -> tick, snapped to the accessible grid
+        .lend() // maker lends: buys credit
+        .apr(apr, NOW) // APR -> tick, snapped to the accessible grid
         .expiry(EXPIRY)
         .group_u64(group)
         .ratifier(ratifier)
@@ -71,7 +99,11 @@ fn main() {
 
     // grid: rungs at fair_apr, fair_apr+STEP, ... (a rate ladder), quoted BY APR
     let aprs: Vec<f64> = (0..GRID).map(|i| fair_apr + APR_STEP * i as f64).collect();
-    let offers: Vec<Offer> = aprs.iter().enumerate().map(|(i, &apr)| rung(maker, ratifier, apr, group_base + i as u64)).collect();
+    let offers: Vec<Offer> = aprs
+        .iter()
+        .enumerate()
+        .map(|(i, &apr)| rung(maker, ratifier, apr, group_base + i as u64))
+        .collect();
     let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
     let root = tree.root();
     let sig = sign_digest(&sk, &tree_digest(root, tree.height(), chain_id, &ratifier));
@@ -82,7 +114,15 @@ fn main() {
 
     let take = |o: &Offer, i: usize, units: u128| {
         let rd = encode_ratifier_data(&sig, &root, i, &tree.proof(i));
-        encode_take_calldata(o, &rd, U256::from(units), &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[])
+        encode_take_calldata(
+            o,
+            &rd,
+            U256::from(units),
+            &addr(ACCOUNT0),
+            &addr(ACCOUNT0),
+            &[0u8; 20],
+            &[],
+        )
     };
     for (i, o) in offers.iter().enumerate() {
         let tick = word_to_u128(&o.tick).unwrap() as u64;

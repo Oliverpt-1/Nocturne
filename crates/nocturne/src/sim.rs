@@ -246,23 +246,36 @@ fn tick_u64(offer: &Offer) -> Result<u64, SimError> {
 
 /// Compute prices and asset amounts for taking `units` of `offer` at time `now`, using the
 /// market's settlement-fee breakpoints. No position state required.
-pub fn take_amounts(offer: &Offer, units: U256, now: u64, cbps: [u16; 7]) -> Result<TakeAmounts, SimError> {
+pub fn take_amounts(
+    offer: &Offer,
+    units: U256,
+    now: u64,
+    cbps: [u16; 7],
+) -> Result<TakeAmounts, SimError> {
     let offer_price = tick_to_price(tick_u64(offer)?)?;
     let maturity = word_to_u256(&offer.market.maturity);
     let ttm = zero_floor_sub(maturity, U256::from(now));
     let fee = settlement_fee(cbps, ttm);
 
     let (seller_price, buyer_price) = if offer.buy {
-        let sp = offer_price.checked_sub(fee).ok_or(SimError::SettlementFeeExceedsPrice)?;
+        let sp = offer_price
+            .checked_sub(fee)
+            .ok_or(SimError::SettlementFeeExceedsPrice)?;
         (sp, offer_price) // buyer_price = seller_price + fee = offer_price
     } else {
         (offer_price, offer_price + fee)
     };
 
     let (buyer_assets, seller_assets) = if offer.buy {
-        (mul_div_down(units, buyer_price, wad()), mul_div_down(units, seller_price, wad()))
+        (
+            mul_div_down(units, buyer_price, wad()),
+            mul_div_down(units, seller_price, wad()),
+        )
     } else {
-        (mul_div_up(units, buyer_price, wad()), mul_div_up(units, seller_price, wad()))
+        (
+            mul_div_up(units, buyer_price, wad()),
+            mul_div_up(units, seller_price, wad()),
+        )
     };
 
     Ok(TakeAmounts {
@@ -374,7 +387,11 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
     // Consumption.
     let consumed = U256::from(ctx.consumed);
     let new_consumed = if assets_capped {
-        let add = if offer.buy { amounts.buyer_assets } else { amounts.seller_assets };
+        let add = if offer.buy {
+            amounts.buyer_assets
+        } else {
+            amounts.seller_assets
+        };
         let nc = consumed + add;
         if nc > U256::from(offer.max_assets) {
             reverts.push(OfferError::ConsumedAssets);
@@ -408,7 +425,11 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
         wad(),
     );
     let seller_pending_fee_decrease = if seller_pos.credit > 0 {
-        mul_div_up(U256::from(seller_pos.pending_fee), seller_credit_decrease, U256::from(seller_pos.credit))
+        mul_div_up(
+            U256::from(seller_pos.pending_fee),
+            seller_credit_decrease,
+            U256::from(seller_pos.credit),
+        )
     } else {
         U256::ZERO
     };
@@ -419,8 +440,11 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
     }
     // reduceOnly: maker's own credit (buy) / debt (sell) must not increase.
     if offer.reduce_only {
-        let maker_increased =
-            if offer.buy { buyer_credit_increase != U256::ZERO } else { seller_debt_increase != U256::ZERO };
+        let maker_increased = if offer.buy {
+            buyer_credit_increase != U256::ZERO
+        } else {
+            seller_debt_increase != U256::ZERO
+        };
         if maker_increased {
             reverts.push(OfferError::MakerCreditOrDebtIncreased);
         }

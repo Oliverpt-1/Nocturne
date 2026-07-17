@@ -140,7 +140,12 @@ fn market_value(m: &crate::Market) -> Value {
         Value::Word(m.chain_id),
         Value::Word(addr_word(&m.midnight)),
         Value::Word(addr_word(&m.loan_token)),
-        Value::Array(m.collateral_params.iter().map(collateral_params_value).collect()),
+        Value::Array(
+            m.collateral_params
+                .iter()
+                .map(collateral_params_value)
+                .collect(),
+        ),
         Value::Word(m.maturity),
         Value::Word(m.rcf_threshold),
         Value::Word(addr_word(&m.enter_gate)),

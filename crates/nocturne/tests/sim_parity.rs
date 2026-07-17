@@ -41,10 +41,16 @@ fn tick_to_price_is_monotonic_nondecreasing() {
         prev = p;
     }
     // Ends at 1 WAD.
-    assert_eq!(tick_to_price(MAX_TICK).unwrap(), U256::from(1_000_000_000_000_000_000u64));
+    assert_eq!(
+        tick_to_price(MAX_TICK).unwrap(),
+        U256::from(1_000_000_000_000_000_000u64)
+    );
 }
 
 #[test]
 fn tick_to_price_rejects_out_of_range() {
-    assert_eq!(tick_to_price(MAX_TICK + 1), Err(SimError::TickOutOfRange((MAX_TICK + 1) as u128)));
+    assert_eq!(
+        tick_to_price(MAX_TICK + 1),
+        Err(SimError::TickOutOfRange((MAX_TICK + 1) as u128))
+    );
 }

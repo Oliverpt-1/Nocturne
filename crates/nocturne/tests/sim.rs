@@ -43,11 +43,20 @@ fn settlement_fee_at_breakpoints_is_exact() {
     // ttm == 0 (post-maturity) -> 0d breakpoint (cbp0).
     assert_eq!(settlement_fee(cbps, U256::ZERO), U256::from(10u128 * CBP));
     // ttm == 1 day -> cbp1.
-    assert_eq!(settlement_fee(cbps, U256::from(DAY)), U256::from(20u128 * CBP));
+    assert_eq!(
+        settlement_fee(cbps, U256::from(DAY)),
+        U256::from(20u128 * CBP)
+    );
     // ttm == 7 days -> cbp2.
-    assert_eq!(settlement_fee(cbps, U256::from(7 * DAY)), U256::from(30u128 * CBP));
+    assert_eq!(
+        settlement_fee(cbps, U256::from(7 * DAY)),
+        U256::from(30u128 * CBP)
+    );
     // ttm == 360 days -> cbp6.
-    assert_eq!(settlement_fee(cbps, U256::from(360 * DAY)), U256::from(70u128 * CBP));
+    assert_eq!(
+        settlement_fee(cbps, U256::from(360 * DAY)),
+        U256::from(70u128 * CBP)
+    );
 }
 
 #[test]
@@ -63,7 +72,12 @@ fn settlement_fee_interpolates_linearly() {
 #[test]
 fn take_amounts_zero_fee_buy() {
     // tick 3372 -> price 0.5 WAD; zero settlement fee.
-    let offer = OfferBuilder::new(market(), MAKER).buy().tick(3372).ratifier(RATIFIER).max_units(u128::MAX).build();
+    let offer = OfferBuilder::new(market(), MAKER)
+        .buy()
+        .tick(3372)
+        .ratifier(RATIFIER)
+        .max_units(u128::MAX)
+        .build();
     let a = take_amounts(&offer, wad(1000), 1_000_000_000, [0; 7]).unwrap();
     assert_eq!(a.offer_price, U256::from(500_000_000_000_000_000u64));
     assert_eq!(a.buyer_price, a.seller_price); // fee = 0
@@ -74,7 +88,12 @@ fn take_amounts_zero_fee_buy() {
 #[test]
 fn take_amounts_with_fee_buy_splits_correctly() {
     // price 0.5 WAD, fee = 100*CBP = 1e14 WAD (cbp6, ttm >= 360d).
-    let offer = OfferBuilder::new(market(), MAKER).buy().tick(3372).ratifier(RATIFIER).max_units(u128::MAX).build();
+    let offer = OfferBuilder::new(market(), MAKER)
+        .buy()
+        .tick(3372)
+        .ratifier(RATIFIER)
+        .max_units(u128::MAX)
+        .build();
     let cbps = [0, 0, 0, 0, 0, 0, 100];
     // maturity 2e9, now 0 -> ttm = 2e9 s > 360 days, so fee = cbp6.
     let units = U256::from(1_000_000u64);
@@ -90,7 +109,12 @@ fn take_amounts_with_fee_buy_splits_correctly() {
 #[test]
 fn take_amounts_sell_rounds_up() {
     // sell offer: buyer_price = offer_price + fee, assets rounded up.
-    let offer = OfferBuilder::new(market(), MAKER).sell().tick(3372).ratifier(RATIFIER).max_units(u128::MAX).build();
+    let offer = OfferBuilder::new(market(), MAKER)
+        .sell()
+        .tick(3372)
+        .ratifier(RATIFIER)
+        .max_units(u128::MAX)
+        .build();
     let a = take_amounts(&offer, U256::from(3u64), 1_000_000_000, [0; 7]).unwrap();
     // price 0.5e18, units 3 -> 3*0.5 = 1.5 -> rounds up to 2.
     assert_eq!(a.buyer_assets, U256::from(2u64));
@@ -130,7 +154,11 @@ fn buy_offer() -> Offer {
 fn simulate_happy_path_deltas() {
     let offer = buy_offer();
     let out = simulate_take(&offer, U256::from(1_000u64), &base_ctx()).unwrap();
-    assert!(out.reverts.is_empty(), "unexpected reverts: {:?}", out.reverts);
+    assert!(
+        out.reverts.is_empty(),
+        "unexpected reverts: {:?}",
+        out.reverts
+    );
     // buy: maker is buyer (debt 0 -> credit increases by units); taker is seller (credit 0 -> all debt).
     assert_eq!(out.buyer_credit_increase, U256::from(1_000u64));
     assert_eq!(out.seller_credit_decrease, U256::ZERO);
@@ -142,7 +170,11 @@ fn simulate_happy_path_deltas() {
 fn simulate_seller_credit_offsets_debt() {
     let offer = buy_offer();
     let mut ctx = base_ctx();
-    ctx.taker_position = Position { credit: 300, debt: 0, pending_fee: 0 }; // taker is seller
+    ctx.taker_position = Position {
+        credit: 300,
+        debt: 0,
+        pending_fee: 0,
+    }; // taker is seller
     let out = simulate_take(&offer, U256::from(1_000u64), &ctx).unwrap();
     // seller has 300 credit -> 300 decreases, remaining 700 becomes debt.
     assert_eq!(out.seller_credit_decrease, U256::from(300u64));
@@ -180,7 +212,9 @@ fn simulate_flags_reduce_only_increase() {
         .build();
     // maker is buyer with no debt -> credit increases -> reduceOnly violated.
     let out = simulate_take(&offer, U256::from(1_000u64), &base_ctx()).unwrap();
-    assert!(out.reverts.contains(&OfferError::MakerCreditOrDebtIncreased));
+    assert!(out
+        .reverts
+        .contains(&OfferError::MakerCreditOrDebtIncreased));
 }
 
 #[test]
@@ -197,7 +231,9 @@ fn simulate_flags_post_maturity_debt() {
     let mut ctx = base_ctx();
     ctx.now = 2_500_000_000; // > maturity
     let out = simulate_take(&offer, U256::from(1_000u64), &ctx).unwrap();
-    assert!(out.reverts.contains(&OfferError::CannotIncreaseDebtPostMaturity));
+    assert!(out
+        .reverts
+        .contains(&OfferError::CannotIncreaseDebtPostMaturity));
 }
 
 #[test]
@@ -216,7 +252,9 @@ fn simulate_flags_tick_and_fee_and_loss() {
     ctx.market.loss_factor_maxed = true;
     let out = simulate_take(&offer, U256::from(1u64), &ctx).unwrap();
     assert!(out.reverts.contains(&OfferError::TickNotAccessible));
-    assert!(out.reverts.contains(&OfferError::ContinuousFeeAboveOfferCap));
+    assert!(out
+        .reverts
+        .contains(&OfferError::ContinuousFeeAboveOfferCap));
     assert!(out.reverts.contains(&OfferError::MarketLossFactorMaxedOut));
 }
 

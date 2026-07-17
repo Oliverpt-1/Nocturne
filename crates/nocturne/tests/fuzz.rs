@@ -65,21 +65,24 @@ fn arb_market() -> impl Strategy<Value = Market> {
 fn arb_offer() -> impl Strategy<Value = Offer> {
     (
         arb_market(),
-        any::<bool>(),                              // buy
-        any::<[u8; 20]>(),                          // maker
-        any::<[u8; 32]>(),                          // start
-        any::<[u8; 32]>(),                          // expiry
-        any::<[u8; 32]>(),                          // tick
-        any::<[u8; 32]>(),                          // group
-        any::<[u8; 20]>(),                          // callback
-        prop::collection::vec(any::<u8>(), 0..64),  // callback_data
-        any::<[u8; 20]>(),                          // receiver_if_maker_is_seller
-        any::<[u8; 20]>(),                          // ratifier
+        any::<bool>(),                             // buy
+        any::<[u8; 20]>(),                         // maker
+        any::<[u8; 32]>(),                         // start
+        any::<[u8; 32]>(),                         // expiry
+        any::<[u8; 32]>(),                         // tick
+        any::<[u8; 32]>(),                         // group
+        any::<[u8; 20]>(),                         // callback
+        prop::collection::vec(any::<u8>(), 0..64), // callback_data
+        any::<[u8; 20]>(),                         // receiver_if_maker_is_seller
+        any::<[u8; 20]>(),                         // ratifier
     )
         .prop_flat_map(
             |(market, buy, maker, start, expiry, tick, group, callback, cbd, recv, ratifier)| {
                 (
-                    Just((market, buy, maker, start, expiry, tick, group, callback, cbd, recv, ratifier)),
+                    Just((
+                        market, buy, maker, start, expiry, tick, group, callback, cbd, recv,
+                        ratifier,
+                    )),
                     any::<bool>(),     // reduce_only
                     any::<u128>(),     // max_units
                     any::<u128>(),     // max_assets
@@ -87,7 +90,19 @@ fn arb_offer() -> impl Strategy<Value = Offer> {
                 )
                     .prop_map(
                         |(
-                            (market, buy, maker, start, expiry, tick, group, callback, cbd, recv, ratifier),
+                            (
+                                market,
+                                buy,
+                                maker,
+                                start,
+                                expiry,
+                                tick,
+                                group,
+                                callback,
+                                cbd,
+                                recv,
+                                ratifier,
+                            ),
                             reduce_only,
                             max_units,
                             max_assets,
@@ -288,38 +303,134 @@ proptest! {
 /// `fixtures/GenFuzz.t.sol` against the Midnight contracts at rev
 /// f47568c9e45a9b70830b82a130b47393dcafec33.
 const VECTORS: &[(&str, &str)] = &[
-    ("0x9d789446496208f38638a4af3262d2957049cb5962907e570a9ed30ec38e2ae7", "979964600000000000"),
-    ("0x8224c1c15d968e1b9733ffa4f778a43946586d0f8f87c275ed6733dc0070875d", "147300000000000"),
-    ("0x8f1719a06d84f2798dc6c45dbe32c5588db090717e785df3d6a4db04b2255a52", "999758700000000000"),
-    ("0x9e6b217ae7dd0929d9ceefced02dcfd8aab9a28efbe63e2243ed5caaa97b0432", "76672300000000000"),
-    ("0xa28308629ff373714de612dda5f923f5ba49cc84ad966fad0690c19dd8ccd09b", "950620000000000000"),
-    ("0x93d585d5162ecc4ef1279d97bf3237cde7193b6e5970e292373c494e3a0cc3fd", "291700000000000"),
-    ("0xfb93b05cc889af8a7079322fc0bb2cc19d025f6602ca36b06db54373bed756d5", "600000000000"),
-    ("0x9c520b1063c4f62367ed9a12a6fd22fa0927166e20c1e0859e474302f17e4d02", "997347800000000000"),
-    ("0x2839eff1826b4ceea1d3f5257656820e1f64ca32800332f3ce2d4fd8de5aaa01", "999999900000000000"),
-    ("0x693372dd17f6e8e776228d4a176df57207847de81875088f08558ecdc018e61d", "317975100000000000"),
-    ("0xa872532c741f7ffcf484b0e6b7536352a17a0aa87008fe11dd06ce1cbfbe9237", "400000000000"),
-    ("0xc41df9134413366c322263425395bfb4983a818277c3845f42e676bc44a091bc", "999999900000000000"),
-    ("0x691aa6894e12c1bda16fdb9d89154af57fb5dd8641f06c6c1912303f1dc390e4", "999999500000000000"),
-    ("0xfe897475f4d97818de62cf8318fbd1a573ac23a8212d1893c3a374eaf070a779", "985788800000000000"),
-    ("0xe8809c70818db509871211aaf9c2313c9a1c6c67393f8ef295079bb3784047e6", "5900000000000"),
-    ("0xbf0d8c39c0a96bf6b5b5a2e53bd9ad9582f172fb2695762a49afd94ce42bcd12", "120700000000000"),
-    ("0x460eb7f697fc67b9ee28f792a214a82ad7a968b38cb432f4d06ca8bb8587ed1e", "200000000000"),
-    ("0xe9f1f6e20565af4f050afc2ac9bb3ce517bafdacf08af7f72effc276c89d4966", "999999300000000000"),
-    ("0x618adfdbefb8905106adec7aa4db9a5b70ad2b9a60157ac767ad561626681808", "999999900000000000"),
-    ("0x86d99b13c447183a448a0e0058eb1dc2a67adefdf0c33c1bfede99c9bc07c44d", "126182100000000000"),
-    ("0x26df219196a88a6dabf8286fb08a3d06a56034db88a01900cb94e1c70487437c", "190900000000000"),
-    ("0x0960ee9dc26fe15c6215a7c5b4e0197f6a5115e0233c5ecbe6b8bcc38ed72e4b", "43855800000000000"),
-    ("0x73301d8a142d92072ec8c6ee4782d15e1abafcac2504a94943f766cd79b7f300", "9300000000000"),
-    ("0x0f5dfaac07959d7de182794c4406042e544b9c091e2fdabccef7b2b466d3e368", "999996600000000000"),
-    ("0x5b19303d10915a5623e8d2c1aa73e41e83e66b98fabfb8f92cfce8f8e744cf57", "999989300000000000"),
-    ("0x46661b2eeab903ee6a4c8706921c9692ab577c6e81e8111da77facbbf40309b9", "654392800000000000"),
-    ("0x610fd6468a5f6df8771120d7329558d3880578d59016daea485423bf16f2251c", "24000000000000"),
-    ("0xb1a9d0bad05f01911897c391a6f54530bc06d6a004243b87007b59e55275c510", "999985400000000000"),
-    ("0xe16cf3875ae54c3ab353b2cfeef14c0f3369f7cbb5bb9d3f2ad7cfa4e66a543b", "999995400000000000"),
-    ("0x74729a41aac8aedd2e412856ce822dc1ffce2a08aa72dc840601522a08c99fc1", "937802400000000000"),
-    ("0x1d5e61debeedb2300e0a7507acb7fd90c1853d7c929bc8538fe36a2a5770cdb5", "601962500000000000"),
-    ("0xc71e0093910cc0af7b690187a2db77c63dc34450100b43752121fba06b7fbed5", "16793400000000000"),
+    (
+        "0x9d789446496208f38638a4af3262d2957049cb5962907e570a9ed30ec38e2ae7",
+        "979964600000000000",
+    ),
+    (
+        "0x8224c1c15d968e1b9733ffa4f778a43946586d0f8f87c275ed6733dc0070875d",
+        "147300000000000",
+    ),
+    (
+        "0x8f1719a06d84f2798dc6c45dbe32c5588db090717e785df3d6a4db04b2255a52",
+        "999758700000000000",
+    ),
+    (
+        "0x9e6b217ae7dd0929d9ceefced02dcfd8aab9a28efbe63e2243ed5caaa97b0432",
+        "76672300000000000",
+    ),
+    (
+        "0xa28308629ff373714de612dda5f923f5ba49cc84ad966fad0690c19dd8ccd09b",
+        "950620000000000000",
+    ),
+    (
+        "0x93d585d5162ecc4ef1279d97bf3237cde7193b6e5970e292373c494e3a0cc3fd",
+        "291700000000000",
+    ),
+    (
+        "0xfb93b05cc889af8a7079322fc0bb2cc19d025f6602ca36b06db54373bed756d5",
+        "600000000000",
+    ),
+    (
+        "0x9c520b1063c4f62367ed9a12a6fd22fa0927166e20c1e0859e474302f17e4d02",
+        "997347800000000000",
+    ),
+    (
+        "0x2839eff1826b4ceea1d3f5257656820e1f64ca32800332f3ce2d4fd8de5aaa01",
+        "999999900000000000",
+    ),
+    (
+        "0x693372dd17f6e8e776228d4a176df57207847de81875088f08558ecdc018e61d",
+        "317975100000000000",
+    ),
+    (
+        "0xa872532c741f7ffcf484b0e6b7536352a17a0aa87008fe11dd06ce1cbfbe9237",
+        "400000000000",
+    ),
+    (
+        "0xc41df9134413366c322263425395bfb4983a818277c3845f42e676bc44a091bc",
+        "999999900000000000",
+    ),
+    (
+        "0x691aa6894e12c1bda16fdb9d89154af57fb5dd8641f06c6c1912303f1dc390e4",
+        "999999500000000000",
+    ),
+    (
+        "0xfe897475f4d97818de62cf8318fbd1a573ac23a8212d1893c3a374eaf070a779",
+        "985788800000000000",
+    ),
+    (
+        "0xe8809c70818db509871211aaf9c2313c9a1c6c67393f8ef295079bb3784047e6",
+        "5900000000000",
+    ),
+    (
+        "0xbf0d8c39c0a96bf6b5b5a2e53bd9ad9582f172fb2695762a49afd94ce42bcd12",
+        "120700000000000",
+    ),
+    (
+        "0x460eb7f697fc67b9ee28f792a214a82ad7a968b38cb432f4d06ca8bb8587ed1e",
+        "200000000000",
+    ),
+    (
+        "0xe9f1f6e20565af4f050afc2ac9bb3ce517bafdacf08af7f72effc276c89d4966",
+        "999999300000000000",
+    ),
+    (
+        "0x618adfdbefb8905106adec7aa4db9a5b70ad2b9a60157ac767ad561626681808",
+        "999999900000000000",
+    ),
+    (
+        "0x86d99b13c447183a448a0e0058eb1dc2a67adefdf0c33c1bfede99c9bc07c44d",
+        "126182100000000000",
+    ),
+    (
+        "0x26df219196a88a6dabf8286fb08a3d06a56034db88a01900cb94e1c70487437c",
+        "190900000000000",
+    ),
+    (
+        "0x0960ee9dc26fe15c6215a7c5b4e0197f6a5115e0233c5ecbe6b8bcc38ed72e4b",
+        "43855800000000000",
+    ),
+    (
+        "0x73301d8a142d92072ec8c6ee4782d15e1abafcac2504a94943f766cd79b7f300",
+        "9300000000000",
+    ),
+    (
+        "0x0f5dfaac07959d7de182794c4406042e544b9c091e2fdabccef7b2b466d3e368",
+        "999996600000000000",
+    ),
+    (
+        "0x5b19303d10915a5623e8d2c1aa73e41e83e66b98fabfb8f92cfce8f8e744cf57",
+        "999989300000000000",
+    ),
+    (
+        "0x46661b2eeab903ee6a4c8706921c9692ab577c6e81e8111da77facbbf40309b9",
+        "654392800000000000",
+    ),
+    (
+        "0x610fd6468a5f6df8771120d7329558d3880578d59016daea485423bf16f2251c",
+        "24000000000000",
+    ),
+    (
+        "0xb1a9d0bad05f01911897c391a6f54530bc06d6a004243b87007b59e55275c510",
+        "999985400000000000",
+    ),
+    (
+        "0xe16cf3875ae54c3ab353b2cfeef14c0f3369f7cbb5bb9d3f2ad7cfa4e66a543b",
+        "999995400000000000",
+    ),
+    (
+        "0x74729a41aac8aedd2e412856ce822dc1ffce2a08aa72dc840601522a08c99fc1",
+        "937802400000000000",
+    ),
+    (
+        "0x1d5e61debeedb2300e0a7507acb7fd90c1853d7c929bc8538fe36a2a5770cdb5",
+        "601962500000000000",
+    ),
+    (
+        "0xc71e0093910cc0af7b690187a2db77c63dc34450100b43752121fba06b7fbed5",
+        "16793400000000000",
+    ),
 ];
 
 fn hx32(s: &str) -> Word {

@@ -60,7 +60,10 @@ fn pipeline(offers: &[Offer], sk: &SigningKey, parallel: bool) -> (Word, u128) {
     let tree = OfferTree::build(leaves).unwrap();
     // generate a proof for every leaf (takers need these to lift individual offers)
     let _proofs: Vec<Vec<Word>> = if parallel {
-        (0..offers.len()).into_par_iter().map(|i| tree.proof(i)).collect()
+        (0..offers.len())
+            .into_par_iter()
+            .map(|i| tree.proof(i))
+            .collect()
     } else {
         (0..offers.len()).map(|i| tree.proof(i)).collect()
     };

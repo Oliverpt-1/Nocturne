@@ -90,11 +90,23 @@ fn leaf_root_digest_match_the_ratifier() {
     let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
     let tree = OfferTree::build(leaves.clone()).unwrap();
 
-    assert_eq!(leaves[0], hx32(EXPECT_LEAF0), "leaf0 hash mismatch vs HashLib.hashOffer");
-    assert_eq!(tree.root(), hx32(EXPECT_ROOT), "root mismatch vs HashLib tree");
+    assert_eq!(
+        leaves[0],
+        hx32(EXPECT_LEAF0),
+        "leaf0 hash mismatch vs HashLib.hashOffer"
+    );
+    assert_eq!(
+        tree.root(),
+        hx32(EXPECT_ROOT),
+        "root mismatch vs HashLib tree"
+    );
 
     let digest = tree_digest(tree.root(), tree.height(), u256(CHAIN_ID), &hx20(RATIFIER));
-    assert_eq!(digest, hx32(EXPECT_DIGEST), "digest mismatch vs EcrecoverRatifier assembly");
+    assert_eq!(
+        digest,
+        hx32(EXPECT_DIGEST),
+        "digest mismatch vs EcrecoverRatifier assembly"
+    );
 }
 
 #[test]
@@ -103,8 +115,16 @@ fn recovered_signer_is_the_maker() {
     let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), u256(CHAIN_ID), &hx20(RATIFIER));
 
-    let sig = Sig { r: hx32(SIG_R), s: hx32(SIG_S), v: SIG_V };
-    assert_eq!(recover(&digest, &sig), Some(hx20(MAKER)), "ecrecover must return the maker");
+    let sig = Sig {
+        r: hx32(SIG_R),
+        s: hx32(SIG_S),
+        v: SIG_V,
+    };
+    assert_eq!(
+        recover(&digest, &sig),
+        Some(hx20(MAKER)),
+        "ecrecover must return the maker"
+    );
 }
 
 #[test]
@@ -112,10 +132,23 @@ fn contract_accepted_signature_passes_verify() {
     // This is the exact `(sig, root, leafIndex, proof)` the on-chain `isRatified` accepted.
     let offers: Vec<Offer> = (0..4).map(make_offer).collect();
     let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
-    let sig = Sig { r: hx32(SIG_R), s: hx32(SIG_S), v: SIG_V };
+    let sig = Sig {
+        r: hx32(SIG_R),
+        s: hx32(SIG_S),
+        v: SIG_V,
+    };
 
     assert!(
-        verify(&offers[0], &tree.root(), 0, &tree.proof(0), &sig, u256(CHAIN_ID), &hx20(RATIFIER), &hx20(MAKER)),
+        verify(
+            &offers[0],
+            &tree.root(),
+            0,
+            &tree.proof(0),
+            &sig,
+            u256(CHAIN_ID),
+            &hx20(RATIFIER),
+            &hx20(MAKER)
+        ),
         "verify must accept the signature the ratifier accepted"
     );
 }

@@ -126,7 +126,11 @@ pub fn market_typehash() -> Word {
     keccak([MARKET_TYPE, COLLATERAL_PARAMS_TYPE].concat().as_bytes())
 }
 pub fn offer_typehash() -> Word {
-    keccak([OFFER_TYPE, COLLATERAL_PARAMS_TYPE, MARKET_TYPE].concat().as_bytes())
+    keccak(
+        [OFFER_TYPE, COLLATERAL_PARAMS_TYPE, MARKET_TYPE]
+            .concat()
+            .as_bytes(),
+    )
 }
 pub fn offer_tree_typehash(height: usize) -> Word {
     let mut field = String::from("OfferTree(Offer");
@@ -135,9 +139,14 @@ pub fn offer_tree_typehash(height: usize) -> Word {
     }
     field.push_str(" offerTree)");
     keccak(
-        [field.as_str(), COLLATERAL_PARAMS_TYPE, MARKET_TYPE, OFFER_TYPE]
-            .concat()
-            .as_bytes(),
+        [
+            field.as_str(),
+            COLLATERAL_PARAMS_TYPE,
+            MARKET_TYPE,
+            OFFER_TYPE,
+        ]
+        .concat()
+        .as_bytes(),
     )
 }
 
@@ -294,14 +303,17 @@ pub struct Sig {
 
 /// Sign the tree digest with the maker's key (secp256k1, in-process — no wallet round-trip).
 pub fn sign_digest(sk: &SigningKey, digest: &Word) -> Sig {
-    let (sig, rec): (EcdsaSig, RecoveryId) =
-        sk.sign_prehash_recoverable(digest).expect("sign");
+    let (sig, rec): (EcdsaSig, RecoveryId) = sk.sign_prehash_recoverable(digest).expect("sign");
     let b = sig.to_bytes();
     let mut r = [0u8; 32];
     let mut s = [0u8; 32];
     r.copy_from_slice(&b[..32]);
     s.copy_from_slice(&b[32..]);
-    Sig { r, s, v: 27 + rec.to_byte() }
+    Sig {
+        r,
+        s,
+        v: 27 + rec.to_byte(),
+    }
 }
 
 /// The Ethereum address of a public key: last 20 bytes of keccak(uncompressed pubkey without the 0x04 tag).
@@ -427,7 +439,16 @@ mod tests {
         // Every leaf verifies with its own proof.
         for (i, offer) in offers.iter().enumerate() {
             assert!(
-                verify(offer, &tree.root(), i, &tree.proof(i), &sig, chain_id, &ratifier, &maker),
+                verify(
+                    offer,
+                    &tree.root(),
+                    i,
+                    &tree.proof(i),
+                    &sig,
+                    chain_id,
+                    &ratifier,
+                    &maker
+                ),
                 "leaf {i} should verify"
             );
         }
@@ -446,7 +467,16 @@ mod tests {
         let sig = sign_digest(&sk, &digest);
 
         let not_maker = [0x99u8; 20];
-        assert!(!verify(&offers[0], &tree.root(), 0, &tree.proof(0), &sig, chain_id, &ratifier, &not_maker));
+        assert!(!verify(
+            &offers[0],
+            &tree.root(),
+            0,
+            &tree.proof(0),
+            &sig,
+            chain_id,
+            &ratifier,
+            &not_maker
+        ));
     }
 
     #[test]
@@ -464,13 +494,40 @@ mod tests {
         // Tampered offer (different tick) no longer hashes to the signed leaf -> proof fails.
         let mut tampered = offers[0].clone();
         tampered.tick = word_u64(999);
-        assert!(!verify(&tampered, &tree.root(), 0, &tree.proof(0), &sig, chain_id, &ratifier, &maker));
+        assert!(!verify(
+            &tampered,
+            &tree.root(),
+            0,
+            &tree.proof(0),
+            &sig,
+            chain_id,
+            &ratifier,
+            &maker
+        ));
 
         // Right offer, wrong leaf index -> proof fails.
-        assert!(!verify(&offers[0], &tree.root(), 1, &tree.proof(1), &sig, chain_id, &ratifier, &maker));
+        assert!(!verify(
+            &offers[0],
+            &tree.root(),
+            1,
+            &tree.proof(1),
+            &sig,
+            chain_id,
+            &ratifier,
+            &maker
+        ));
 
         // Wrong chain id -> different digest -> recovers a different address.
-        assert!(!verify(&offers[0], &tree.root(), 0, &tree.proof(0), &sig, word_u64(999), &ratifier, &maker));
+        assert!(!verify(
+            &offers[0],
+            &tree.root(),
+            0,
+            &tree.proof(0),
+            &sig,
+            word_u64(999),
+            &ratifier,
+            &maker
+        ));
     }
 
     #[test]

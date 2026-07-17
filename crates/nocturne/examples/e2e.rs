@@ -65,7 +65,12 @@ fn hx(b: &[u8]) -> String {
 
 fn market() -> Market {
     MarketBuilder::new(CHAIN_ID, env_addr("MIDNIGHT"), env_addr("LOAN"))
-        .collateral(env_addr("COLLATERAL"), U256::from(LLTV), U256::from(CURSOR), env_addr("ORACLE"))
+        .collateral(
+            env_addr("COLLATERAL"),
+            U256::from(LLTV),
+            U256::from(CURSOR),
+            env_addr("ORACLE"),
+        )
         .maturity(MATURITY)
         .build()
 }
@@ -97,7 +102,10 @@ fn gen() {
     // offer signature (maker's key) + self-check it verifies
     let digest = tree_digest(root, tree.height(), chain_id, &ratifier);
     let sig = sign_digest(&sk, &digest);
-    assert!(verify(&offer, &root, 0, &proof, &sig, chain_id, &ratifier, &maker), "verify failed");
+    assert!(
+        verify(&offer, &root, 0, &proof, &sig, chain_id, &ratifier, &maker),
+        "verify failed"
+    );
 
     // authorization to let the ratifier act for the maker (hot-key delegation tool)
     let auth = Authorization::new(maker, ratifier, true, U256::ZERO, U256::from(MATURITY));
@@ -109,8 +117,8 @@ fn gen() {
         &offer,
         &ratifier_data,
         U256::from(UNITS),
-        &addr(ACCOUNT0),      // taker
-        &addr(ACCOUNT0),      // receiverIfTakerIsSeller (buy offer -> taker is seller)
+        &addr(ACCOUNT0), // taker
+        &addr(ACCOUNT0), // receiverIfTakerIsSeller (buy offer -> taker is seller)
         &[0u8; 20],
         &[],
     );
@@ -119,7 +127,12 @@ fn gen() {
     // predictions (fresh positions, real non-zero settlement fee, ttm >= 360d -> flat cbp6)
     let ctx = SimCtx {
         now: 1,
-        market: SimMarket { tick_spacing: DEFAULT_TICK_SPACING, continuous_fee: 0, settlement_fee_cbp: CBPS, loss_factor_maxed: false },
+        market: SimMarket {
+            tick_spacing: DEFAULT_TICK_SPACING,
+            continuous_fee: 0,
+            settlement_fee_cbp: CBPS,
+            loss_factor_maxed: false,
+        },
         consumed: 0,
         maker_position: Position::default(),
         taker_position: Position::default(),
@@ -130,16 +143,51 @@ fn gen() {
     // sizing: how many units to receive ~TARGET_SELLER_ASSETS, and what that take really yields
     let units2 = seller_assets_to_units(&offer, U256::from(TARGET_SELLER_ASSETS), 1, CBPS).unwrap();
     let pred2 = take_amounts(&offer, units2, 1, CBPS).unwrap();
-    let take2 = encode_take_calldata(&offer, &ratifier_data, units2, &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[]);
+    let take2 = encode_take_calldata(
+        &offer,
+        &ratifier_data,
+        units2,
+        &addr(ACCOUNT0),
+        &addr(ACCOUNT0),
+        &[0u8; 20],
+        &[],
+    );
 
     // validate: a tick not aligned to spacing (5 % 4 != 0) must be flagged AND revert on-chain
-    let bad = OfferBuilder::new(market(), maker).buy().tick(5).expiry(EXPIRY).group_u64(GROUP + 1)
-        .ratifier(ratifier).max_units(u128::MAX).continuous_fee_cap(U256::MAX).build();
-    let bad_ctx = ValidateCtx { market: Some(MarketSnapshot { tick_spacing: DEFAULT_TICK_SPACING, loss_factor_maxed: false, continuous_fee: 0 }), ..Default::default() };
+    let bad = OfferBuilder::new(market(), maker)
+        .buy()
+        .tick(5)
+        .expiry(EXPIRY)
+        .group_u64(GROUP + 1)
+        .ratifier(ratifier)
+        .max_units(u128::MAX)
+        .continuous_fee_cap(U256::MAX)
+        .build();
+    let bad_ctx = ValidateCtx {
+        market: Some(MarketSnapshot {
+            tick_spacing: DEFAULT_TICK_SPACING,
+            loss_factor_maxed: false,
+            continuous_fee: 0,
+        }),
+        ..Default::default()
+    };
     let bad_flagged = validate_offer(&bad, &bad_ctx).contains(&OfferError::TickNotAccessible);
     let bad_root = OfferTree::build(vec![hash_offer(&bad)]).unwrap().root();
-    let bad_rd = encode_ratifier_data(&sign_digest(&sk, &tree_digest(bad_root, 0, chain_id, &ratifier)), &bad_root, 0, &[]);
-    let bad_take = encode_take_calldata(&bad, &bad_rd, U256::from(UNITS), &addr(ACCOUNT0), &addr(ACCOUNT0), &[0u8; 20], &[]);
+    let bad_rd = encode_ratifier_data(
+        &sign_digest(&sk, &tree_digest(bad_root, 0, chain_id, &ratifier)),
+        &bad_root,
+        0,
+        &[],
+    );
+    let bad_take = encode_take_calldata(
+        &bad,
+        &bad_rd,
+        U256::from(UNITS),
+        &addr(ACCOUNT0),
+        &addr(ACCOUNT0),
+        &[0u8; 20],
+        &[],
+    );
 
     println!("MAKER {}", hx(&maker));
     println!("ROOT {}", hx(&root));
@@ -170,7 +218,9 @@ fn gen() {
 
 fn read_hex_arg(a: &str) -> Vec<u8> {
     let a = a.trim().trim_start_matches("0x");
-    (0..a.len() / 2).map(|i| u8::from_str_radix(&a[2 * i..2 * i + 2], 16).unwrap()).collect()
+    (0..a.len() / 2)
+        .map(|i| u8::from_str_radix(&a[2 * i..2 * i + 2], 16).unwrap())
+        .collect()
 }
 
 fn main() {

@@ -148,7 +148,11 @@ fn fixture_offer() -> Offer {
 }
 
 fn fixture_sig() -> Sig {
-    Sig { r: word32(0x11), s: word32(0x22), v: 28 }
+    Sig {
+        r: word32(0x11),
+        s: word32(0x22),
+        v: 28,
+    }
 }
 
 // ---- selectors ----
@@ -212,7 +216,11 @@ fn cancel_root_calldata_matches_solidity() {
 #[test]
 fn empty_proof_and_bytes_encode_cleanly() {
     // No proof elements, empty ratifier/callback data: still valid ABI (offsets + zero lengths).
-    let sig = Sig { r: word32(1), s: word32(2), v: 27 };
+    let sig = Sig {
+        r: word32(1),
+        s: word32(2),
+        v: 27,
+    };
     let rd = encode_ratifier_data(&sig, &word32(9), 0, &[]);
     // head: v, r, s, root, leafIndex, proof-offset (6 words) + proof length word = 7 words.
     assert_eq!(rd.len(), 7 * 32);
@@ -226,7 +234,12 @@ fn empty_proof_and_bytes_encode_cleanly() {
 fn take_calldata_embeds_ratifier_data_verbatim() {
     // The ratifierData bytes must appear byte-for-byte inside the take calldata tail.
     let offer = fixture_offer();
-    let ratifier_data = encode_ratifier_data(&fixture_sig(), &word32(0x33), 2, &[word32(0x44), word32(0x55)]);
+    let ratifier_data = encode_ratifier_data(
+        &fixture_sig(),
+        &word32(0x33),
+        2,
+        &[word32(0x44), word32(0x55)],
+    );
     let calldata = encode_take_calldata(
         &offer,
         &ratifier_data,
@@ -238,7 +251,9 @@ fn take_calldata_embeds_ratifier_data_verbatim() {
     );
     let window = ratifier_data.len();
     assert!(
-        calldata.windows(window).any(|w| w == ratifier_data.as_slice()),
+        calldata
+            .windows(window)
+            .any(|w| w == ratifier_data.as_slice()),
         "ratifierData should be embedded verbatim in the take calldata"
     );
 }

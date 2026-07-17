@@ -46,7 +46,10 @@ fn sample_offer() -> Offer {
 #[test]
 fn tree_build_errors_instead_of_panicking() {
     // Non-power-of-two and empty return Err, not a panic.
-    assert_eq!(OfferTree::build(vec![[0u8; 32]; 3]), Err(TreeError::NotPowerOfTwo(3)));
+    assert_eq!(
+        OfferTree::build(vec![[0u8; 32]; 3]),
+        Err(TreeError::NotPowerOfTwo(3))
+    );
     assert_eq!(OfferTree::build(vec![]), Err(TreeError::NotPowerOfTwo(0)));
     // A valid power of two succeeds.
     assert!(OfferTree::build(vec![[0u8; 32]; 4]).is_ok());
@@ -63,7 +66,11 @@ fn offer_serde_roundtrips_and_preserves_hash() {
 
 #[test]
 fn sig_serde_roundtrips() {
-    let sig = Sig { r: u256(111), s: u256(222), v: 27 };
+    let sig = Sig {
+        r: u256(111),
+        s: u256(222),
+        v: 27,
+    };
     let json = serde_json::to_string(&sig).unwrap();
     let back: Sig = serde_json::from_str(&json).unwrap();
     assert_eq!(sig, back);

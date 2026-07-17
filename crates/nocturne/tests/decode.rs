@@ -142,7 +142,11 @@ fn sample_offer(cps: Vec<CollateralParams>, callback_data: Vec<u8>, buy: bool) -
 fn assert_offer_eq(a: &Offer, b: &Offer) {
     // Cheapest exhaustive check: identical EIP-712 leaf and identical re-encoding.
     assert_eq!(hash_offer(a), hash_offer(b), "hash_offer mismatch");
-    assert_eq!(abi_encode_offer(a), abi_encode_offer(b), "re-encode mismatch");
+    assert_eq!(
+        abi_encode_offer(a),
+        abi_encode_offer(b),
+        "re-encode mismatch"
+    );
 
     // Explicit field spot-checks for good measure.
     assert_eq!(a.buy, b.buy);
@@ -179,7 +183,11 @@ fn assert_offer_eq(a: &Offer, b: &Offer) {
 
 #[test]
 fn round_trip_empty_callback_one_collateral() {
-    let o = sample_offer(vec![cp(0x33, 860_000_000_000_000_000, 1, 0x44)], vec![], true);
+    let o = sample_offer(
+        vec![cp(0x33, 860_000_000_000_000_000, 1, 0x44)],
+        vec![],
+        true,
+    );
     let decoded = decode_offer(&abi_encode_offer(&o)).unwrap();
     assert_offer_eq(&o, &decoded);
 }
@@ -190,7 +198,10 @@ fn round_trip_nonempty_callback() {
     let o = sample_offer(vec![cp(0x33, 5, 6, 0x44)], data, false);
     let decoded = decode_offer(&abi_encode_offer(&o)).unwrap();
     assert_offer_eq(&o, &decoded);
-    assert_eq!(decoded.callback_data, vec![0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03]);
+    assert_eq!(
+        decoded.callback_data,
+        vec![0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03]
+    );
 }
 
 #[test]
@@ -247,15 +258,7 @@ fn build_market_state(
 #[test]
 fn decode_market_state_fields_and_projections() {
     let cbp = [1u16, 2, 3, 4, 5, 6, 7];
-    let bytes = build_market_state(
-        1_000_000,
-        123,
-        50,
-        7,
-        cbp,
-        250,
-        60,
-    );
+    let bytes = build_market_state(1_000_000, 123, 50, 7, cbp, 250, 60);
     let ms = decode_market_state(&bytes).unwrap();
     assert_eq!(ms.total_units, 1_000_000);
     assert_eq!(ms.loss_factor, 123);
@@ -329,10 +332,22 @@ fn truncated_offer_is_too_short_not_panic() {
 
 #[test]
 fn empty_input_is_too_short() {
-    assert!(matches!(decode_offer(&[]), Err(DecodeError::TooShort { .. })));
-    assert!(matches!(decode_market_state(&[]), Err(DecodeError::TooShort { .. })));
-    assert!(matches!(decode_position(&[]), Err(DecodeError::TooShort { .. })));
-    assert!(matches!(decode_consumed(&[]), Err(DecodeError::TooShort { .. })));
+    assert!(matches!(
+        decode_offer(&[]),
+        Err(DecodeError::TooShort { .. })
+    ));
+    assert!(matches!(
+        decode_market_state(&[]),
+        Err(DecodeError::TooShort { .. })
+    ));
+    assert!(matches!(
+        decode_position(&[]),
+        Err(DecodeError::TooShort { .. })
+    ));
+    assert!(matches!(
+        decode_consumed(&[]),
+        Err(DecodeError::TooShort { .. })
+    ));
 }
 
 #[test]
@@ -352,7 +367,10 @@ fn bad_bool_word_errors() {
     // Corrupt the last byte of that word to an invalid bool value.
     let buy_word_end = 32 + 2 * 32; // end of head word index 1
     bytes[buy_word_end - 1] = 5;
-    assert!(matches!(decode_offer(&bytes), Err(DecodeError::InvalidBool)));
+    assert!(matches!(
+        decode_offer(&bytes),
+        Err(DecodeError::InvalidBool)
+    ));
 }
 
 #[test]
@@ -360,7 +378,10 @@ fn oversized_u128_errors() {
     // A consumed word with a high byte set does not fit in u128.
     let mut w = [0u8; 32];
     w[0] = 1;
-    assert!(matches!(decode_consumed(&w), Err(DecodeError::IntegerOverflow)));
+    assert!(matches!(
+        decode_consumed(&w),
+        Err(DecodeError::IntegerOverflow)
+    ));
 }
 
 // ---- contract-anchored fixture (from fixtures/GenDecode.t.sol) ---------------

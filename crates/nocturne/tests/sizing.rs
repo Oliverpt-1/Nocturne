@@ -49,7 +49,11 @@ fn offer(buy: bool, tick: u64, max_units: u128, max_assets: u128) -> Offer {
         .ratifier([0xbb; 20])
         .continuous_fee_cap(U256::MAX);
     // The builder's cap setters are mutually exclusive, so set only the one in use.
-    let b = if max_units > 0 { b.max_units(max_units) } else { b.max_assets(max_assets) };
+    let b = if max_units > 0 {
+        b.max_units(max_units)
+    } else {
+        b.max_assets(max_assets)
+    };
     let b = if buy { b.buy() } else { b.sell() };
     b.build()
 }
@@ -129,25 +133,40 @@ fn consumable_units_subtracts_consumption() {
     let assets_buy = offer(true, TICK, 0, MAX_ASSETS);
     let expected_buy =
         buyer_assets_to_units(&assets_buy, U256::from(MAX_ASSETS - consumed), NOW, CBPS).unwrap();
-    assert_eq!(consumable_units(&assets_buy, consumed, NOW, CBPS).unwrap(), expected_buy);
+    assert_eq!(
+        consumable_units(&assets_buy, consumed, NOW, CBPS).unwrap(),
+        expected_buy
+    );
 
     let assets_sell = offer(false, TICK, 0, MAX_ASSETS);
     let expected_sell =
         seller_assets_to_units(&assets_sell, U256::from(MAX_ASSETS - consumed), NOW, CBPS).unwrap();
-    assert_eq!(consumable_units(&assets_sell, consumed, NOW, CBPS).unwrap(), expected_sell);
+    assert_eq!(
+        consumable_units(&assets_sell, consumed, NOW, CBPS).unwrap(),
+        expected_sell
+    );
 }
 
 #[test]
 fn consumable_units_fully_consumed_is_zero() {
     // Over-consumption must floor at zero, never underflow.
     let units_capped = offer(true, TICK, MAX_UNITS_CAP, 0);
-    assert_eq!(consumable_units(&units_capped, MAX_UNITS_CAP + 1, NOW, CBPS).unwrap(), U256::ZERO);
+    assert_eq!(
+        consumable_units(&units_capped, MAX_UNITS_CAP + 1, NOW, CBPS).unwrap(),
+        U256::ZERO
+    );
 
     let assets_buy = offer(true, TICK, 0, MAX_ASSETS);
-    assert_eq!(consumable_units(&assets_buy, MAX_ASSETS + 1, NOW, CBPS).unwrap(), U256::ZERO);
+    assert_eq!(
+        consumable_units(&assets_buy, MAX_ASSETS + 1, NOW, CBPS).unwrap(),
+        U256::ZERO
+    );
 
     let assets_sell = offer(false, TICK, 0, MAX_ASSETS);
-    assert_eq!(consumable_units(&assets_sell, MAX_ASSETS, NOW, CBPS).unwrap(), U256::ZERO);
+    assert_eq!(
+        consumable_units(&assets_sell, MAX_ASSETS, NOW, CBPS).unwrap(),
+        U256::ZERO
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -186,8 +205,14 @@ fn round_trip_within_rounding_with_fee() {
         let a = take_amounts(&o, units, NOW, CBPS).unwrap();
         let ru_buyer = buyer_assets_to_units(&o, a.buyer_assets, NOW, CBPS).unwrap();
         let ru_seller = seller_assets_to_units(&o, a.seller_assets, NOW, CBPS).unwrap();
-        assert!(close(ru_buyer, units), "buyer round-trip (buy={buy}): got {ru_buyer}");
-        assert!(close(ru_seller, units), "seller round-trip (buy={buy}): got {ru_seller}");
+        assert!(
+            close(ru_buyer, units),
+            "buyer round-trip (buy={buy}): got {ru_buyer}"
+        );
+        assert!(
+            close(ru_seller, units),
+            "seller round-trip (buy={buy}): got {ru_seller}"
+        );
     }
 }
 
@@ -199,12 +224,18 @@ fn sizing_to_target_hits_target_assets() {
     // Buy offer, buyer side is fee-independent (buyer_price == offer_price) -> exact.
     let buy = offer(true, TICK, u128::MAX, 0);
     let units = buyer_assets_to_units(&buy, t, NOW, CBPS).unwrap();
-    assert_eq!(take_amounts(&buy, units, NOW, CBPS).unwrap().buyer_assets, t);
+    assert_eq!(
+        take_amounts(&buy, units, NOW, CBPS).unwrap().buyer_assets,
+        t
+    );
 
     // Sell offer, seller side is fee-independent (seller_price == offer_price) -> exact.
     let sell = offer(false, TICK, u128::MAX, 0);
     let units = seller_assets_to_units(&sell, t, NOW, CBPS).unwrap();
-    assert_eq!(take_amounts(&sell, units, NOW, CBPS).unwrap().seller_assets, t);
+    assert_eq!(
+        take_amounts(&sell, units, NOW, CBPS).unwrap().seller_assets,
+        t
+    );
 }
 
 // ---------------------------------------------------------------------------

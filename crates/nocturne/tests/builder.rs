@@ -133,5 +133,14 @@ fn built_offer_hashes_and_signs() {
     let chain_id = word_from_u64(1);
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &RATIFIER);
     let sig = sign_digest(&sk, &digest);
-    assert!(verify(&offer, &tree.root(), 0, &tree.proof(0), &sig, chain_id, &RATIFIER, &maker));
+    assert!(verify(
+        &offer,
+        &tree.root(),
+        0,
+        &tree.proof(0),
+        &sig,
+        chain_id,
+        &RATIFIER,
+        &maker
+    ));
 }

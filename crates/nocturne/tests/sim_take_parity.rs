@@ -30,7 +30,12 @@ const EXPECT_NEW_CONSUMED: u64 = 1_000_000;
 // Addresses/group don't affect the amount math, so any well-formed market works.
 fn offer() -> Offer {
     let market = MarketBuilder::new(1, [0x11; 20], [0x22; 20])
-        .collateral([0x33; 20], U256::from(770_000_000_000_000_000u64), U256::from(300_000_000_000_000_000u64), [0x44; 20])
+        .collateral(
+            [0x33; 20],
+            U256::from(770_000_000_000_000_000u64),
+            U256::from(300_000_000_000_000_000u64),
+            [0x44; 20],
+        )
         .maturity(MATURITY)
         .build();
     OfferBuilder::new(market, [0x55; 20])
@@ -52,9 +57,21 @@ fn settlement_fee_matches_contract() {
 #[test]
 fn take_amounts_match_contract() {
     let a = take_amounts(&offer(), U256::from(UNITS), NOW, CBPS).unwrap();
-    assert_eq!(a.offer_price, U256::from(500_000_000_000_000_000u64), "offer price");
-    assert_eq!(a.buyer_assets, U256::from(EXPECT_BUYER_ASSETS), "buyer assets");
-    assert_eq!(a.seller_assets, U256::from(EXPECT_SELLER_ASSETS), "seller assets");
+    assert_eq!(
+        a.offer_price,
+        U256::from(500_000_000_000_000_000u64),
+        "offer price"
+    );
+    assert_eq!(
+        a.buyer_assets,
+        U256::from(EXPECT_BUYER_ASSETS),
+        "buyer assets"
+    );
+    assert_eq!(
+        a.seller_assets,
+        U256::from(EXPECT_SELLER_ASSETS),
+        "seller assets"
+    );
     assert_eq!(
         a.settlement_fee_assets,
         U256::from(EXPECT_BUYER_ASSETS - EXPECT_SELLER_ASSETS),
@@ -73,19 +90,26 @@ fn simulate_take_matches_contract() {
             loss_factor_maxed: false,
         },
         consumed: 0,
-        maker_position: Position::default(),  // buyer, fresh
-        taker_position: Position::default(),  // seller, fresh
+        maker_position: Position::default(), // buyer, fresh
+        taker_position: Position::default(), // seller, fresh
         taker_is_maker: false,
     };
     let out = simulate_take(&offer(), U256::from(UNITS), &ctx).unwrap();
 
-    assert!(out.reverts.is_empty(), "take should succeed, got {:?}", out.reverts);
+    assert!(
+        out.reverts.is_empty(),
+        "take should succeed, got {:?}",
+        out.reverts
+    );
     assert_eq!(out.amounts.buyer_assets, U256::from(EXPECT_BUYER_ASSETS));
     assert_eq!(out.amounts.seller_assets, U256::from(EXPECT_SELLER_ASSETS));
     assert_eq!(out.buyer_credit_increase, U256::from(UNITS));
     assert_eq!(out.seller_debt_increase, U256::from(UNITS));
     assert_eq!(out.seller_credit_decrease, U256::ZERO);
-    assert_eq!(out.buyer_pending_fee_increase, U256::from(EXPECT_BUYER_PENDING_FEE));
+    assert_eq!(
+        out.buyer_pending_fee_increase,
+        U256::from(EXPECT_BUYER_PENDING_FEE)
+    );
     assert_eq!(out.seller_pending_fee_decrease, U256::ZERO);
     assert_eq!(out.new_consumed, U256::from(EXPECT_NEW_CONSUMED));
 }
