@@ -12,7 +12,12 @@ fn main() {
 
     // build a market and a "lend at 7.2% APR" offer
     let market = MarketBuilder::new(1, [0x11; 20], [0x22; 20])
-        .collateral([0x33; 20], U256::from(770_000_000_000_000_000u64), U256::from(1u64), [0x44; 20])
+        .collateral(
+            [0x33; 20],
+            U256::from(770_000_000_000_000_000u64),
+            U256::from(1u64),
+            [0x44; 20],
+        )
         .maturity(2_000_000_000)
         .build();
     let offer = OfferBuilder::new(market, maker)
@@ -28,7 +33,16 @@ fn main() {
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
-    let ok = verify(&offer, &tree.root(), 0, &tree.proof(0), &sig, chain_id, &ratifier, &maker);
+    let ok = verify(
+        &offer,
+        &tree.root(),
+        0,
+        &tree.proof(0),
+        &sig,
+        chain_id,
+        &ratifier,
+        &maker,
+    );
 
     println!("maker        {}", to_hex(&maker));
     println!("tick         {}", word_to_u128(&offer.tick).unwrap());
