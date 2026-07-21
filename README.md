@@ -20,9 +20,9 @@ the off-chain infrastructure needed to quote markets, generate Merkle trees, sig
 execution, and interact with Midnight with minimal latency. While Midnight settles credit onchain,
 offers are created and managed offchain, where Nocturne operates.
 
-Every hash, signature, price calculation, and calldata layout is parity-checked byte-for-byte
-against the protocol contracts (`cargo test`), and the full offer lifecycle is exercised against a
-real Anvil deployment.
+Every hash, signature, price calculation, and calldata layout is checked byte-for-byte against
+vectors derived from the protocol contracts (`cargo test`), and the full offer lifecycle is
+exercised against the real contracts on a live Anvil deployment (`crates/nocturne/e2e/`).
 
 Built and maintained by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
 
@@ -31,9 +31,9 @@ Built and maintained by Oliver Tipton, and licensed under the Apache-2.0 and MIT
 
 ## Status
 
-This is an early (v0.1.0) release. Nocturne is parity-checked byte-for-byte against the Midnight
-contracts and exercised end-to-end on a live anvil deployment, but it has **not** been
-independently security-audited. Verify against your own deployment before relying on it with real value, and see
+This is an early (v0.1.0) release. Nocturne is checked byte-for-byte against vectors derived from
+the Midnight contracts and exercised end-to-end against the real contracts on a live anvil
+deployment, but it has **not** been independently security-audited. Verify against your own deployment before relying on it with real value, and see
 [SECURITY.md](SECURITY.md) to report issues.
 
 ## Getting help
