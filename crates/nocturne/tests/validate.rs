@@ -129,9 +129,7 @@ fn zero_ratifier_is_rejected() {
     // A zero ratifier can never be authorized on-chain, so it's a stateless reject.
     let mut o = good_offer();
     o.ratifier = [0u8; 20];
-    assert!(
-        validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::RatifierUnauthorized)
-    );
+    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::RatifierUnauthorized));
 
     // A nonzero ratifier clears the stateless check (on-chain authorization still applies).
     let mut o = good_offer();
