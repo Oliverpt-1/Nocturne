@@ -125,6 +125,23 @@ fn buy_offer_must_have_zero_maker_receiver() {
 }
 
 #[test]
+fn zero_ratifier_is_rejected() {
+    // A zero ratifier can never be authorized on-chain, so it's a stateless reject.
+    let mut o = good_offer();
+    o.ratifier = [0u8; 20];
+    assert!(
+        validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::RatifierUnauthorized)
+    );
+
+    // A nonzero ratifier clears the stateless check (on-chain authorization still applies).
+    let mut o = good_offer();
+    o.ratifier = [0xcc; 20];
+    assert!(
+        !validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::RatifierUnauthorized)
+    );
+}
+
+#[test]
 fn collateral_structure() {
     // Empty.
     let mut o = good_offer();

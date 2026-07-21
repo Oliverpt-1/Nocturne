@@ -5,8 +5,8 @@
 //! instead of discovering it when a taker's `take` reverts on the critical path.
 //!
 //! Checks split by what they need:
-//! - **Stateless** (from the offer alone): caps, tick range, receiver rule, market structure,
-//!   `start <= expiry`.
+//! - **Stateless** (from the offer alone): caps, tick range, receiver rule, nonzero ratifier,
+//!   market structure, `start <= expiry`.
 //! - **Context** (from a [`ValidateCtx`] the maker fills in as far as it can): chain id, midnight
 //!   address, current time, and a live-market snapshot (tick spacing, loss factor, continuous fee).
 //!
@@ -36,6 +36,10 @@ pub enum OfferError {
     StartAfterExpiry,
     /// `buy` offer must leave `receiverIfMakerIsSeller` zero (the maker is the buyer).
     UnusedReceiverMustBeZero,
+    /// `ratifier` is the zero address, which can never be authorized, so `take` always reverts
+    /// `RatifierUnauthorized`. Only the stateless zero case is caught here; whether a nonzero
+    /// ratifier is actually authorized (`isAuthorized[maker][ratifier]`) needs chain state.
+    RatifierUnauthorized,
     /// Market has no collateral params.
     NoCollateralParams,
     /// Market has more than `MAX_COLLATERALS` collateral params.
@@ -149,6 +153,11 @@ pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
     }
     if offer.buy && offer.receiver_if_maker_is_seller != [0u8; 20] {
         errs.push(OfferError::UnusedReceiverMustBeZero);
+    }
+    // `isAuthorized[maker][address(0)]` is always false, so a zero ratifier is a guaranteed
+    // `RatifierUnauthorized` revert regardless of chain state.
+    if offer.ratifier == [0u8; 20] {
+        errs.push(OfferError::RatifierUnauthorized);
     }
 
     let cps = &offer.market.collateral_params;
