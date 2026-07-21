@@ -26,8 +26,8 @@ real Anvil deployment.
 
 Built and maintained by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
 
-> **Note:** This project is **not** endorsed by, nor affiliated with, Morpho Labs or its
-> subsidiaries.
+> **Note:** This project is **not** endorsed by, nor affiliated with, Morpho. See the full
+> [disclaimer](DISCLAIMER.md).
 
 ## Status
 
@@ -78,6 +78,13 @@ for how to report vulnerabilities privately.
 - [`tiny-keccak`](https://github.com/debris/tiny-keccak), [`rayon`](https://github.com/rayon-rs/rayon).
 - [Foundry](https://github.com/foundry-rs/foundry) - `anvil` / `forge` / `cast` power the parity
   fixtures and the live e2e harness.
+
+## Disclaimer
+
+Independent, personal open source project - not created, endorsed, audited, or supported by Morpho.
+Provided "AS IS" with no warranty and no liability, and it is not financial, investment, or legal
+advice. Interacting with blockchain protocols and automated trading carries significant risk,
+including total loss of funds. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
 
 ## License
 
