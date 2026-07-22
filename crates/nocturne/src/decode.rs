@@ -9,7 +9,10 @@
 //!
 //! Malformed input never panics: every path returns a [`DecodeError`].
 
-use crate::{Address, CollateralParams, Market, MarketSnapshot, Offer, Position, SimMarket, Word};
+use crate::{
+    word_to_u256, Address, CollateralParams, Market, MarketSnapshot, Offer, Position, Sig,
+    SimMarket, Word, U256,
+};
 
 /// Failure decoding ABI-encoded offer or state bytes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -34,6 +37,9 @@ pub enum DecodeError {
     /// A `bool` word was neither 0 nor 1 (or had dirty high bytes).
     #[error("invalid bool encoding")]
     InvalidBool,
+    /// The calldata's leading 4-byte selector did not match the expected function.
+    #[error("unexpected function selector: {0:02x?}")]
+    BadSelector([u8; 4]),
 }
 
 // ---- word-level readers ------------------------------------------------------
@@ -239,6 +245,32 @@ fn decode_bytes(bytes: &[u8], base: usize) -> Result<Vec<u8>, DecodeError> {
     Ok(bytes[start..end].to_vec())
 }
 
+/// Decode an ABI `bytes32[]` (dynamic array of static words) whose length word is at absolute
+/// offset `base`: a length word followed by that many inline words.
+fn decode_word_array(bytes: &[u8], base: usize) -> Result<Vec<Word>, DecodeError> {
+    let len = word_to_usize(&word_at(bytes, base)?)?;
+    let elems_base = resolve(base, 32)?;
+    let span = len.checked_mul(32).ok_or(DecodeError::BadLength(len))?;
+    let end = elems_base
+        .checked_add(span)
+        .ok_or(DecodeError::BadLength(len))?;
+    if end > bytes.len() {
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
+    }
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let off = resolve(
+            elems_base,
+            i.checked_mul(32).ok_or(DecodeError::BadLength(len))?,
+        )?;
+        out.push(word_at(bytes, off)?);
+    }
+    Ok(out)
+}
+
 // ---- on-chain state decoding -------------------------------------------------
 
 /// Decoded return of Midnight's `marketState(id)` getter.
@@ -363,4 +395,127 @@ pub fn decode_position(bytes: &[u8]) -> Result<PositionView, DecodeError> {
 /// Decode a single `uint128` word (e.g. a consumed-units getter return).
 pub fn decode_consumed(bytes: &[u8]) -> Result<u128, DecodeError> {
     word_to_u128(&word_at(bytes, 0)?)
+}
+
+// ---- calldata decoding -------------------------------------------------------
+
+/// The `EcrecoverRatifier` ratifier data, decoded - the inverse of
+/// [`encode_ratifier_data`](crate::encode_ratifier_data).
+///
+/// This is what a taker submits as the `bytes ratifierData` argument to `take`, and what the
+/// maker's signature commits to: `sig` signs the EIP-712 digest over (`root`, tree height),
+/// where the tree height is `proof.len()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RatifierData {
+    /// The maker's signature over the tree digest.
+    pub sig: Sig,
+    /// The signed Merkle root.
+    pub root: Word,
+    /// The offer's leaf index in the tree.
+    pub leaf_index: usize,
+    /// The Merkle proof from the leaf to `root`; its length is the tree height.
+    pub proof: Vec<Word>,
+}
+
+/// Decode `abi.encode(Signature{uint8 v, bytes32 r, bytes32 s}, bytes32 root, uint256 leafIndex,
+/// bytes32[] proof)` - the inverse of [`encode_ratifier_data`](crate::encode_ratifier_data).
+pub fn decode_ratifier_data(bytes: &[u8]) -> Result<RatifierData, DecodeError> {
+    // `Signature` is a static 3-word tuple inlined in the head: v (padded), r, s.
+    let v = word_to_small(&word_at(bytes, 0)?, 1)? as u8;
+    let r = word_at(bytes, 32)?;
+    let s = word_at(bytes, 64)?;
+    let root = word_at(bytes, 96)?;
+    let leaf_index = word_to_usize(&word_at(bytes, 128)?)?;
+    // `proof` is a dynamic array: head word 5 is its offset from the start of this blob.
+    let proof_off = word_to_usize(&word_at(bytes, 160)?)?;
+    let proof = decode_word_array(bytes, proof_off)?;
+    Ok(RatifierData {
+        sig: Sig { r, s, v },
+        root,
+        leaf_index,
+        proof,
+    })
+}
+
+/// A decoded `Midnight.take` call - the inverse of
+/// [`encode_take_calldata`](crate::encode_take_calldata).
+///
+/// Everything a taker's transaction carries, split back into typed fields. `ratifier_data` is
+/// the already-decoded [`RatifierData`]; `ratifier_data_raw` keeps the original bytes so callers
+/// can re-verify the exact blob that was signed over / submitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TakeCall {
+    /// The offer being taken.
+    pub offer: Offer,
+    /// The raw `ratifierData` bytes as they appear in the calldata.
+    pub ratifier_data_raw: Vec<u8>,
+    /// The decoded `ratifierData` (signature, root, leaf index, proof).
+    pub ratifier_data: RatifierData,
+    /// Units the taker is consuming.
+    pub units: U256,
+    /// The taker address.
+    pub taker: Address,
+    /// Receiver of assets when the taker is the seller (buy offers).
+    pub receiver_if_taker_is_seller: Address,
+    /// Optional taker callback target (zero if unused).
+    pub taker_callback: Address,
+    /// Optional taker callback data.
+    pub taker_callback_data: Vec<u8>,
+}
+
+/// Decode raw `Midnight.take(...)` calldata (4-byte selector + ABI args) into a [`TakeCall`] -
+/// the inverse of [`encode_take_calldata`](crate::encode_take_calldata).
+///
+/// Errors [`DecodeError::BadSelector`] if the leading selector is not
+/// [`TAKE_SELECTOR`](crate::TAKE_SELECTOR).
+pub fn decode_take_calldata(bytes: &[u8]) -> Result<TakeCall, DecodeError> {
+    let args = strip_selector(bytes, crate::TAKE_SELECTOR)?;
+    // Head: [offer offset, ratifierData offset, units, taker, receiver, callback, callbackData off]
+    let offer_off = word_to_usize(&head_word(args, 0, 0)?)?;
+    let ratifier_off = word_to_usize(&head_word(args, 0, 1)?)?;
+    let units = word_to_u256(&head_word(args, 0, 2)?);
+    let taker = word_to_address(&head_word(args, 0, 3)?);
+    let receiver_if_taker_is_seller = word_to_address(&head_word(args, 0, 4)?);
+    let taker_callback = word_to_address(&head_word(args, 0, 5)?);
+    let callback_data_off = word_to_usize(&head_word(args, 0, 6)?)?;
+
+    let offer = decode_offer_tuple(args, offer_off)?;
+    let ratifier_data_raw = decode_bytes(args, ratifier_off)?;
+    let ratifier_data = decode_ratifier_data(&ratifier_data_raw)?;
+    let taker_callback_data = decode_bytes(args, callback_data_off)?;
+
+    Ok(TakeCall {
+        offer,
+        ratifier_data_raw,
+        ratifier_data,
+        units,
+        taker,
+        receiver_if_taker_is_seller,
+        taker_callback,
+        taker_callback_data,
+    })
+}
+
+/// Decode raw `EcrecoverRatifier.cancelRoot(address maker, bytes32 root)` calldata - the inverse
+/// of [`encode_cancel_root_calldata`](crate::encode_cancel_root_calldata).
+pub fn decode_cancel_root_calldata(bytes: &[u8]) -> Result<(Address, Word), DecodeError> {
+    let args = strip_selector(bytes, crate::CANCEL_ROOT_SELECTOR)?;
+    let maker = word_to_address(&head_word(args, 0, 0)?);
+    let root = head_word(args, 0, 1)?;
+    Ok((maker, root))
+}
+
+/// Verify the leading 4-byte selector and return the ABI-args slice that follows it.
+fn strip_selector(bytes: &[u8], expected: [u8; 4]) -> Result<&[u8], DecodeError> {
+    if bytes.len() < 4 {
+        return Err(DecodeError::TooShort {
+            needed: 4,
+            have: bytes.len(),
+        });
+    }
+    let selector = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    if selector != expected {
+        return Err(DecodeError::BadSelector(selector));
+    }
+    Ok(&bytes[4..])
 }

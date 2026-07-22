@@ -123,7 +123,7 @@ fn bool_word(b: bool) -> Word {
     w
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CollateralParams {
     pub token: Address,
     pub lltv: Word,
@@ -131,7 +131,7 @@ pub struct CollateralParams {
     pub oracle: Address,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Market {
     pub chain_id: Word,
     pub midnight: Address,
@@ -143,7 +143,7 @@ pub struct Market {
     pub liquidator_gate: Address,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Offer {
     pub market: Market,
     pub buy: bool,
