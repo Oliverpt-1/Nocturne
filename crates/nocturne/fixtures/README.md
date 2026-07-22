@@ -12,6 +12,12 @@ Authoritative test vectors for `nocturne`, generated from the Midnight contracts
   back the resulting amounts and position deltas; baked into `../tests/sim_take_parity.rs`. Because
   it imports `BaseTest.sol`, drop it in the contracts' `test/` dir to regenerate (as above).
 
+- `GenCodec.t.sol` - emits Solidity's own `abi.encode` / `abi.encodeCall` output for a fixed
+  Offer + Signature + proof + take params; baked into `../tests/codec.rs`. The same golden blobs
+  also anchor the **decoders** (`decode_take_calldata` / `decode_ratifier_data` /
+  `decode_cancel_root_calldata`): `../tests/codec.rs` decodes them back and asserts the exact
+  inputs, so the decoders are contract-anchored, not merely inverses of the Rust encoders.
+
 This is intentionally **not** part of `cargo test`: the Rust test carries the constants so the
 crate builds and tests standalone (same pattern as the typehash constants in `../tests/parity.rs`).
 

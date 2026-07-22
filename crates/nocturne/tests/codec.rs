@@ -211,6 +211,45 @@ fn cancel_root_calldata_matches_solidity() {
     assert_eq!(got.len(), 4 + 64); // selector + two static words
 }
 
+// ---- contract-anchored decoding (inverse of the above) ----
+//
+// Decoding the same golden blobs GenCodec.t.sol produced must reproduce the exact fixture
+// inputs, which anchors the decoders to the contracts (not merely to the Rust encoders).
+
+#[test]
+fn decode_take_calldata_matches_solidity() {
+    let decoded = decode_take_calldata(&hx(TAKE_CALLDATA_HEX)).unwrap();
+    assert_eq!(decoded.offer, fixture_offer());
+    assert_eq!(decoded.units, U256::from(250_000u64));
+    assert_eq!(decoded.taker, addr(0xcc));
+    assert_eq!(decoded.receiver_if_taker_is_seller, addr(0xdd));
+    assert_eq!(decoded.taker_callback, addr(0xee));
+    assert_eq!(decoded.taker_callback_data, vec![0xca, 0xfe]);
+
+    let rd = &decoded.ratifier_data;
+    assert_eq!(rd.sig, fixture_sig());
+    assert_eq!(rd.root, word32(0x33));
+    assert_eq!(rd.leaf_index, 2);
+    assert_eq!(rd.proof, vec![word32(0x44), word32(0x55)]);
+}
+
+#[test]
+fn decode_ratifier_data_matches_solidity() {
+    let rd = decode_ratifier_data(&hx(RATIFIER_DATA_HEX)).unwrap();
+    assert_eq!(rd.sig, fixture_sig());
+    assert_eq!(rd.root, word32(0x33));
+    assert_eq!(rd.leaf_index, 2);
+    assert_eq!(rd.proof, vec![word32(0x44), word32(0x55)]);
+}
+
+#[test]
+fn decode_cancel_root_calldata_matches_solidity() {
+    let (maker, root) = decode_cancel_root_calldata(&hx(CANCEL_ROOT_CALLDATA_HEX)).unwrap();
+    let expected: Address = [0x12, 0x34, 0x56, 0x78, 0x90].repeat(4).try_into().unwrap();
+    assert_eq!(maker, expected);
+    assert_eq!(root, word32(0x33));
+}
+
 // ---- structural checks independent of the fixture ----
 
 #[test]
