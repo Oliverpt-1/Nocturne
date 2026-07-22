@@ -1,0 +1,386 @@
+//! `nocturne-verify` - an offline decoder and verifier for Morpho Midnight offer payloads.
+//!
+//! The problem it solves is *blind signing*: a Midnight offer is a deep, heavily-nested payload,
+//! and a signer staring at a 32-byte digest (or a wall of hex) cannot tell what they are about to
+//! authorize. This tool reproduces, entirely offline, the two things that matter:
+//!
+//! * **what the bytes say** - decode a `take` payload / offer / ratifier blob into readable terms;
+//! * **what the signature commits to** - reproduce the Merkle root and the EIP-712 digest, and
+//!   confirm the signature recovers to the intended maker.
+//!
+//! Nothing here touches the network or holds a key. It is a deliberately independent
+//! reimplementation, parity-checked against the Midnight contracts, so it can catch a bug (or a
+//! tampered field) in whatever produced the payload.
+//!
+//! See the crate README for the full workflow and the independence caveat.
+
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand, ValueEnum};
+use nocturne::*;
+
+mod render;
+
+#[derive(Parser)]
+#[command(
+    name = "nocturne-verify",
+    version,
+    about = "Offline decoder + signature/Merkle-root verifier for Morpho Midnight offers"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Decode a raw payload (take calldata, offer, ratifier data, or a getter return) into
+    /// human-readable terms.
+    Decode {
+        /// The payload as hex (`0x`-prefixed or not).
+        payload: String,
+        /// Force the payload type instead of auto-detecting from the selector.
+        #[arg(long, value_enum)]
+        r#type: Option<PayloadType>,
+        /// Reference Unix time, used to compute APR from the tick.
+        #[arg(long)]
+        now: Option<u64>,
+        /// Emit JSON instead of the text report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a `take` payload: reproduce the signed Merkle root and confirm the signature
+    /// recovers to the offer's maker. Exits non-zero if any check fails.
+    Verify {
+        /// The `take` calldata as hex.
+        payload: String,
+        /// Chain id for the EIP-712 domain (defaults to the offer's `market.chainId`).
+        #[arg(long)]
+        chain_id: Option<u64>,
+        /// Also assert the recovered signer equals this address.
+        #[arg(long)]
+        expected_maker: Option<String>,
+        /// Reference Unix time, used to compute APR in the printed terms.
+        #[arg(long)]
+        now: Option<u64>,
+    },
+    /// Reproduce the Merkle root and EIP-712 digest from the offer terms you *intend* to sign
+    /// (JSON files), so you can compare against what a wallet displays.
+    Digest {
+        /// One or more offer JSON files (each a serialized `Offer`). Order sets leaf indices.
+        offers: Vec<std::path::PathBuf>,
+        /// Chain id for the EIP-712 domain (defaults to the first offer's `market.chainId`).
+        #[arg(long)]
+        chain_id: Option<u64>,
+        /// Ratifier / verifying contract (defaults to the first offer's `ratifier`).
+        #[arg(long)]
+        ratifier: Option<String>,
+        /// Assert the computed digest equals this 32-byte hex value; exit non-zero otherwise.
+        #[arg(long)]
+        expect: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PayloadType {
+    Take,
+    Offer,
+    Ratifier,
+    Cancel,
+    MarketState,
+    Position,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let result = match cli.command {
+        Command::Decode {
+            payload,
+            r#type,
+            now,
+            json,
+        } => cmd_decode(&payload, r#type, now, json),
+        Command::Verify {
+            payload,
+            chain_id,
+            expected_maker,
+            now,
+        } => cmd_verify(&payload, chain_id, expected_maker.as_deref(), now),
+        Command::Digest {
+            offers,
+            chain_id,
+            ratifier,
+            expect,
+        } => cmd_digest(&offers, chain_id, ratifier.as_deref(), expect.as_deref()),
+    };
+    match result {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+// ---- commands ----------------------------------------------------------------
+
+fn cmd_decode(
+    payload: &str,
+    forced: Option<PayloadType>,
+    now: Option<u64>,
+    json: bool,
+) -> Result<ExitCode, String> {
+    let bytes = parse_hex(payload)?;
+    let kind = forced.map(Ok).unwrap_or_else(|| detect(&bytes))?;
+
+    match kind {
+        PayloadType::Take => {
+            let t = decode_take_calldata(&bytes).map_err(|e| e.to_string())?;
+            if json {
+                print_json(&render::take_json(&t));
+            } else {
+                println!("Decoded Midnight take(...) payload\n");
+                print!("{}", render::take_text(&t, now));
+            }
+        }
+        PayloadType::Offer => {
+            let o = decode_offer(&bytes).map_err(|e| e.to_string())?;
+            if json {
+                print_json(&render::offer_json(&o));
+            } else {
+                println!("Decoded offer\n");
+                print!("{}", render::offer_text(&o, now));
+            }
+        }
+        PayloadType::Ratifier => {
+            let rd = decode_ratifier_data(&bytes).map_err(|e| e.to_string())?;
+            if json {
+                print_json(&render::ratifier_json(&rd));
+            } else {
+                println!("Decoded ratifier data\n");
+                print!("{}", render::ratifier_text(&rd));
+            }
+        }
+        PayloadType::Cancel => {
+            let (maker, root) = decode_cancel_root_calldata(&bytes).map_err(|e| e.to_string())?;
+            println!("Decoded cancelRoot(...) payload\n");
+            println!("  maker : {}", render::checksum(&maker));
+            println!("  root  : {}", render::hex_bytes(&root));
+        }
+        PayloadType::MarketState => {
+            let m = decode_market_state(&bytes).map_err(|e| e.to_string())?;
+            println!("Decoded marketState return\n");
+            print!("{}", render::market_state_text(&m));
+        }
+        PayloadType::Position => {
+            let p = decode_position(&bytes).map_err(|e| e.to_string())?;
+            println!("Decoded position return\n");
+            print!("{}", render::position_text(&p));
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_verify(
+    payload: &str,
+    chain_id: Option<u64>,
+    expected_maker: Option<&str>,
+    now: Option<u64>,
+) -> Result<ExitCode, String> {
+    let bytes = parse_hex(payload)?;
+    let t = decode_take_calldata(&bytes).map_err(|e| e.to_string())?;
+    let rd = &t.ratifier_data;
+    let offer = &t.offer;
+
+    // Chain id: explicit flag wins; otherwise trust the offer's own market.chainId.
+    let chain_id_word = match chain_id {
+        Some(id) => word_from_u64(id),
+        None => offer.market.chain_id,
+    };
+    let ratifier = offer.ratifier;
+
+    println!("Verifying Midnight take(...) payload\n");
+    print!("{}", render::take_text(&t, now));
+    println!("\nchecks:");
+
+    let mut ok = true;
+
+    // 1. The offer's leaf sits under the signed root at the claimed index.
+    let leaf = hash_offer(offer);
+    let leaf_ok = verify_leaf(&rd.root, &leaf, rd.leaf_index, &rd.proof);
+    check(
+        &mut ok,
+        leaf_ok,
+        "offer leaf is under the signed Merkle root",
+    );
+
+    // 2. Recompute the EIP-712 digest and recover the signer.
+    let digest = tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier);
+    let signer = recover(&digest, &rd.sig);
+    let signer_is_maker = signer.as_ref() == Some(&offer.maker);
+    check(
+        &mut ok,
+        signer_is_maker,
+        "signature recovers to the offer's maker",
+    );
+    if let Some(s) = signer {
+        println!("      recovered signer  : {}", render::checksum(&s));
+    } else {
+        println!("      recovered signer  : (invalid signature)");
+    }
+    println!("      digest            : {}", render::hex_bytes(&digest));
+
+    // 3. Optional explicit maker assertion.
+    if let Some(exp) = expected_maker {
+        let exp_addr = parse_addr(exp)?;
+        check(
+            &mut ok,
+            signer.as_ref() == Some(&exp_addr),
+            "recovered signer equals --expected-maker",
+        );
+    }
+
+    // 4. Cross-check: if a chain id was supplied, it should match the offer's own.
+    if let Some(id) = chain_id {
+        let matches = offer.market.chain_id == word_from_u64(id);
+        check(
+            &mut ok,
+            matches,
+            "--chain-id matches the offer's market.chainId",
+        );
+    }
+
+    println!();
+    if ok {
+        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+fn cmd_digest(
+    paths: &[std::path::PathBuf],
+    chain_id: Option<u64>,
+    ratifier: Option<&str>,
+    expect: Option<&str>,
+) -> Result<ExitCode, String> {
+    if paths.is_empty() {
+        return Err("provide at least one offer JSON file".to_string());
+    }
+    let mut offers = Vec::new();
+    for p in paths {
+        let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        let offer: Offer =
+            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
+        offers.push(offer);
+    }
+
+    let chain_id_word = match chain_id {
+        Some(id) => word_from_u64(id),
+        None => offers[0].market.chain_id,
+    };
+    let ratifier_addr = match ratifier {
+        Some(r) => parse_addr(r)?,
+        None => offers[0].ratifier,
+    };
+
+    let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
+    let tree = OfferTree::build(leaves.clone()).map_err(|e| format!("tree: {e:?}"))?;
+    let root = tree.root();
+    let height = tree.height();
+    let domain = domain_separator(chain_id_word, &ratifier_addr);
+    let digest = tree_digest(root, height, chain_id_word, &ratifier_addr);
+
+    println!("Reproduced EIP-712 signing digest from intended terms\n");
+    println!("  chain id            : {}", word_to_u256(&chain_id_word));
+    println!(
+        "  ratifier (verifier) : {}",
+        render::checksum(&ratifier_addr)
+    );
+    for (i, leaf) in leaves.iter().enumerate() {
+        println!("  leaf[{i}]             : {}", render::hex_bytes(leaf));
+    }
+    println!("  merkle root         : {}", render::hex_bytes(&root));
+    println!("  tree height         : {height}");
+    println!("  domain separator    : {}", render::hex_bytes(&domain));
+    println!("  DIGEST (to sign)    : {}", render::hex_bytes(&digest));
+
+    if let Some(exp) = expect {
+        let exp_word = parse_word(exp)?;
+        println!();
+        if exp_word == digest {
+            println!("MATCH: the wallet digest matches the intended terms.");
+            Ok(ExitCode::SUCCESS)
+        } else {
+            println!(
+                "MISMATCH: --expect {} != {}",
+                render::hex_bytes(&exp_word),
+                render::hex_bytes(&digest)
+            );
+            println!("Do NOT sign: the digest does not correspond to these terms.");
+            Ok(ExitCode::FAILURE)
+        }
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+// ---- helpers -----------------------------------------------------------------
+
+fn check(ok: &mut bool, pass: bool, label: &str) {
+    println!("  [{}] {label}", if pass { "PASS" } else { "FAIL" });
+    if !pass {
+        *ok = false;
+    }
+}
+
+fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
+    if bytes.len() >= 4 {
+        let sel = [bytes[0], bytes[1], bytes[2], bytes[3]];
+        if sel == TAKE_SELECTOR {
+            return Ok(PayloadType::Take);
+        }
+        if sel == CANCEL_ROOT_SELECTOR {
+            return Ok(PayloadType::Cancel);
+        }
+    }
+    if decode_offer(bytes).is_ok() {
+        return Ok(PayloadType::Offer);
+    }
+    Err(
+        "could not auto-detect payload type; pass --type (getter returns like \
+         market-state/position have no selector and must be specified)"
+            .to_string(),
+    )
+}
+
+fn print_json(v: &serde_json::Value) {
+    println!("{}", serde_json::to_string_pretty(v).unwrap());
+}
+
+fn parse_hex(s: &str) -> Result<Vec<u8>, String> {
+    let s = s.trim().trim_start_matches("0x");
+    hex::decode(s).map_err(|e| format!("invalid hex: {e}"))
+}
+
+fn parse_addr(s: &str) -> Result<Address, String> {
+    let b = parse_hex(s)?;
+    if b.len() != 20 {
+        return Err(format!("address must be 20 bytes, got {}", b.len()));
+    }
+    let mut a = [0u8; 20];
+    a.copy_from_slice(&b);
+    Ok(a)
+}
+
+fn parse_word(s: &str) -> Result<Word, String> {
+    let b = parse_hex(s)?;
+    if b.len() != 32 {
+        return Err(format!("expected 32 bytes, got {}", b.len()));
+    }
+    let mut w = [0u8; 32];
+    w.copy_from_slice(&b);
+    Ok(w)
+}

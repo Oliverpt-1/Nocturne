@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nocturne"]
+members = ["crates/nocturne", "crates/nocturne-verify"]
 
 [profile.release]
 opt-level = 3
