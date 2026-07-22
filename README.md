@@ -62,12 +62,11 @@ cargo run --example quickstart        # demo: build -> sign -> verify an offer i
 cargo run --release --example bench   # perf: time the hash -> tree -> sign pipeline
 ```
 
-## Verifying payloads (anti blind-signing)
+## Verifying payloads
 
-Signing a Midnight offer means approving a deep, opaque payload. The
-[`nocturne-verify`](crates/nocturne-verify/) CLI decodes that payload into readable terms and,
-entirely offline, reproduces the Merkle root and EIP-712 digest so a signer can confirm what they
-are about to sign instead of blind-signing a hex blob.
+A Midnight offer is a deep, opaque payload. The [`nocturne-verify`](crates/nocturne-verify/) CLI
+decodes that payload into readable terms and, entirely offline, reproduces the Merkle root and
+EIP-712 digest so a signer can confirm what they are about to sign.
 
 ```sh
 cargo install --path crates/nocturne-verify

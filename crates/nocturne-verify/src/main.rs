@@ -1,8 +1,8 @@
 //! `nocturne-verify` - an offline decoder and verifier for Morpho Midnight offer payloads.
 //!
-//! The problem it solves is *blind signing*: a Midnight offer is a deep, heavily-nested payload,
-//! and a signer staring at a 32-byte digest (or a wall of hex) cannot tell what they are about to
-//! authorize. This tool reproduces, entirely offline, the two things that matter:
+//! A Midnight offer is a deep, heavily-nested payload, and a signer staring at a 32-byte digest
+//! (or a wall of hex) cannot tell what they are about to authorize. This tool reproduces, entirely
+//! offline, the two things that matter:
 //!
 //! * **what the bytes say** - decode a `take` payload / offer / ratifier blob into readable terms;
 //! * **what the signature commits to** - reproduce the Merkle root and the EIP-712 digest, and

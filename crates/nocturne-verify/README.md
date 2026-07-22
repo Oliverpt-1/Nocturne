@@ -3,9 +3,9 @@
 **An offline decoder and signature/Merkle-root verifier for Morpho Midnight offer payloads.**
 
 Midnight offers are deep, heavily-nested payloads. When you sign one, your wallet shows you a
-32-byte digest (or a wall of hex) that you cannot independently check — this is **blind signing**.
-`nocturne-verify` fixes that: entirely offline, it reproduces the two things that matter and shows
-them to you in plain terms:
+32-byte digest (or a wall of hex) that you cannot independently check. `nocturne-verify` closes
+that gap: entirely offline, it reproduces the two things that matter and shows them to you in
+plain terms:
 
 1. **What the bytes say** — decode a `take` payload / offer / ratifier blob into readable fields
    (tick → price & APR, timestamps → dates, checksummed addresses), with the security-critical
@@ -78,15 +78,14 @@ nocturne-verify digest offer.json --chain-id 31337 --eip712
 
 `--chain-id` and `--ratifier` default to the first offer's `market.chainId` and `ratifier`.
 
-## Two workflows — and which one actually defeats blind signing
+## Two workflows — and which one is stronger
 
 **A. Verify the app's payload (`verify`).** Fast and catches the common failures: a malformed
 offer, a signature over different terms, a wrong maker. Use it on every payload.
 
 **B. Independent cross-check (`digest --expect`).** *Stronger.* You feed in the terms you intend to
 sign, sourced from **your own records — not the app**, and compare the digest the tool computes
-against what your wallet shows. This is the check that defeats blind signing, because it does not
-trust the payload producer at all.
+against what your wallet shows. It does not trust the payload producer at all.
 
 > **Why B is stronger:** `verify` re-decodes bytes the app produced. If the app itself is fully
 > compromised it could hand a self-consistent lie to both the wallet and the verifier. The
