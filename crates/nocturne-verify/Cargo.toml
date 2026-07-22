@@ -10,6 +10,7 @@ repository = "https://github.com/Oliverpt-1/Nocturne"
 homepage = "https://github.com/Oliverpt-1/Nocturne"
 keywords = ["ethereum", "morpho", "midnight", "eip712", "blind-signing"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+readme = "README.md"
 
 [[bin]]
 name = "nocturne-verify"
