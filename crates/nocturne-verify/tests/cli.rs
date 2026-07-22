@@ -158,6 +158,37 @@ fn digest_matches_and_mismatches() {
 }
 
 #[test]
+fn digest_eip712_emits_valid_typed_data() {
+    let (_hex, offer, _) = signed_take();
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "nocturne_verify_eip712_{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, serde_json::to_string(&offer).unwrap()).unwrap();
+
+    let (stdout, _e, code) = run(&[
+        "digest",
+        path.to_str().unwrap(),
+        "--chain-id",
+        "31337",
+        "--eip712",
+    ]);
+    assert_eq!(code, 0, "{stdout}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(v["primaryType"], "OfferTree");
+    assert_eq!(v["domain"]["chainId"], "31337");
+    assert!(v["types"]["Offer"].is_array());
+    assert!(v["message"]["offerTree"].is_object());
+    assert_eq!(
+        v["message"]["offerTree"]["buy"],
+        serde_json::Value::Bool(true)
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn bad_hex_errors_cleanly() {
     let (_out, err, code) = run(&["decode", "0xzzzz"]);
     assert_eq!(code, 1);

@@ -19,6 +19,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use nocturne::*;
 
+mod eip712;
 mod render;
 
 #[derive(Parser)]
@@ -78,6 +79,10 @@ enum Command {
         /// Assert the computed digest equals this 32-byte hex value; exit non-zero otherwise.
         #[arg(long)]
         expect: Option<String>,
+        /// Emit the full EIP-712 typed-data JSON (for diffing against an eth_signTypedData_v4
+        /// wallet) instead of the digest summary.
+        #[arg(long)]
+        eip712: bool,
     },
 }
 
@@ -111,7 +116,14 @@ fn main() -> ExitCode {
             chain_id,
             ratifier,
             expect,
-        } => cmd_digest(&offers, chain_id, ratifier.as_deref(), expect.as_deref()),
+            eip712,
+        } => cmd_digest(
+            &offers,
+            chain_id,
+            ratifier.as_deref(),
+            expect.as_deref(),
+            eip712,
+        ),
     };
     match result {
         Ok(code) => code,
@@ -265,6 +277,7 @@ fn cmd_digest(
     chain_id: Option<u64>,
     ratifier: Option<&str>,
     expect: Option<&str>,
+    eip712: bool,
 ) -> Result<ExitCode, String> {
     if paths.is_empty() {
         return Err("provide at least one offer JSON file".to_string());
@@ -292,6 +305,12 @@ fn cmd_digest(
     let height = tree.height();
     let domain = domain_separator(chain_id_word, &ratifier_addr);
     let digest = tree_digest(root, height, chain_id_word, &ratifier_addr);
+
+    if eip712 {
+        let td = eip712::typed_data(&offers, chain_id_word, &ratifier_addr, height);
+        print_json(&td);
+        return Ok(ExitCode::SUCCESS);
+    }
 
     println!("Reproduced EIP-712 signing digest from intended terms\n");
     println!("  chain id            : {}", word_to_u256(&chain_id_word));
