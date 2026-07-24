@@ -43,11 +43,17 @@ fn offer_for(maker: Address) -> Offer {
 
 /// Returns (take-calldata hex, offer, signer address).
 fn signed_take() -> (String, Offer, Address) {
+    signed_take_sig(false)
+}
+
+/// Like [`signed_take`], but with `high_s` the signature is replaced by its high-`s`
+/// (malleable) counterpart `(r, n - s, flipped v)`, which on-chain `ecrecover` still accepts.
+fn signed_take_sig(high_s: bool) -> (String, Offer, Address) {
     let signer = LocalSigner::from_bytes(&[0x42; 32]).unwrap();
     let offer = offer_for(signer.address());
     let chain_id = word_from_u64(31337);
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
-    let sig = signer
+    let mut sig = signer
         .sign_digest(&tree_digest(
             tree.root(),
             tree.height(),
@@ -55,6 +61,13 @@ fn signed_take() -> (String, Offer, Address) {
             &offer.ratifier,
         ))
         .unwrap();
+    if high_s {
+        sig = Sig {
+            r: sig.r,
+            s: high_s_counterpart(&sig.s),
+            v: if sig.v == 27 { 28 } else { 27 },
+        };
+    }
     let rd = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
     let calldata = encode_take_calldata(
         &offer,
@@ -109,6 +122,23 @@ fn verify_passes_for_good_payload() {
     assert_eq!(code, 0, "{stdout}");
     assert!(stdout.contains("RESULT: PASS"), "{stdout}");
     assert!(stdout.contains(&render_addr(&signer)), "{stdout}");
+    // A low-s signature must not trip the malleability warning.
+    assert!(!stdout.contains("[WARN]"), "{stdout}");
+}
+
+#[test]
+fn verify_warns_but_passes_for_high_s_signature() {
+    // ecrecover accepts the malleated high-s counterpart, so the verdict is PASS - but the
+    // tool must flag the signature as malleable.
+    let (hex, _offer, signer) = signed_take_sig(true);
+    let (stdout, _err, code) = run(&["verify", &hex, "--chain-id", "31337"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("RESULT: PASS"), "{stdout}");
+    assert!(stdout.contains(&render_addr(&signer)), "{stdout}");
+    assert!(
+        stdout.contains("[WARN]") && stdout.contains("high-s"),
+        "{stdout}"
+    );
 }
 
 #[test]

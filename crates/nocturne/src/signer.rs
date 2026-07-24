@@ -19,8 +19,9 @@ use k256::ecdsa::{Signature as EcdsaSig, SigningKey};
 
 use crate::{recover, signer_address, Address, Sig, Word, U256};
 
-/// secp256k1 group order `n`, big-endian. Used only to build a high-`s` value in tests; the
-/// production low-`s` normalization goes through [`EcdsaSig::normalize_s`].
+/// secp256k1 group order `n`, big-endian. Backs [`is_high_s`] and the test-oriented
+/// [`high_s_counterpart`]; the production low-`s` normalization goes through
+/// [`EcdsaSig::normalize_s`].
 pub const SECP256K1_N: Word = [
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
     0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
@@ -214,6 +215,14 @@ where
     }
 }
 
+/// Whether `s` falls in the high half of the scalar range (`s > n / 2`) - the malleable form
+/// that on-chain `ecrecover` (and therefore [`crate::recover`]) accepts but low-`s` (BIP-0062)
+/// tooling rejects or rewrites. Use it to flag signatures that should have been normalized.
+pub fn is_high_s(s: &Word) -> bool {
+    let half_n = U256::from_be_bytes(SECP256K1_N) >> 1;
+    U256::from_be_bytes(*s) > half_n
+}
+
 /// Compute `n - s` (big-endian), the high-`s` counterpart of a low-`s` value. Exposed for
 /// tests exercising the low-`s` normalization path.
 pub fn high_s_counterpart(s: &Word) -> Word {
@@ -232,6 +241,14 @@ mod tests {
         let digest = crate::keccak(b"local signer unit test digest...");
         let sig = signer.sign_digest(&digest).unwrap();
         assert_eq!(recover(&digest, &sig).as_ref(), Some(&signer.address()));
+    }
+
+    #[test]
+    fn is_high_s_boundary() {
+        // floor(n/2) is the largest low-s value; one above it is the smallest high-s value.
+        let half_n: U256 = U256::from_be_bytes(SECP256K1_N) >> 1;
+        assert!(!is_high_s(&half_n.to_be_bytes::<32>()));
+        assert!(is_high_s(&(half_n + U256::from(1u64)).to_be_bytes::<32>()));
     }
 
     #[test]

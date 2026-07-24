@@ -241,6 +241,14 @@ fn cmd_verify(
         println!("      recovered signer  : (invalid signature)");
     }
     println!("      digest            : {}", render::hex_bytes(&digest));
+    // Malleability note: on-chain ecrecover (and therefore `recover`) accepts a high-s
+    // signature, but low-s tooling may reject or rewrite it - flag it even on a PASS.
+    if signer.is_some() && is_high_s(&rd.sig.s) {
+        println!(
+            "  [WARN] signature is high-s (malleable, not low-s normalized); \
+             on-chain ecrecover accepts it"
+        );
+    }
 
     // 3. Optional explicit maker assertion.
     if let Some(exp) = expected_maker {

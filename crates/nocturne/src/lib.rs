@@ -377,13 +377,28 @@ pub fn signer_address(sk: &SigningKey) -> Address {
 /// Recover the signer address from a digest and signature, exactly as the `ecrecover` in
 /// `EcrecoverRatifier.isRatified`. Returns `None` for a malformed signature (the on-chain
 /// equivalent of `ecrecover` yielding `address(0)`).
+///
+/// Like the precompile, this accepts a high-`s` (malleable) signature: `ecrecover` takes any
+/// `s` in `[1, n-1]` with no low-`s` guard, so the malleated counterpart `(r, n - s, flipped v)`
+/// of a valid signature recovers the same address. Detect such signatures with [`is_high_s`].
 pub fn recover(digest: &Word, sig: &Sig) -> Option<Address> {
-    // v is 27/28 on-chain; RecoveryId wants 0/1.
-    let rec = RecoveryId::from_byte(sig.v.checked_sub(27)?)?;
+    // v is 27/28 on-chain (anything else makes ecrecover yield address(0)); RecoveryId wants 0/1.
+    if sig.v != 27 && sig.v != 28 {
+        return None;
+    }
+    let mut rec = RecoveryId::from_byte(sig.v - 27)?;
     let mut rs = [0u8; 64];
     rs[..32].copy_from_slice(&sig.r);
     rs[32..].copy_from_slice(&sig.s);
-    let ecdsa = EcdsaSig::from_slice(&rs).ok()?;
+    let mut ecdsa = EcdsaSig::from_slice(&rs).ok()?;
+    // `ecrecover` accepts any `s` in [1, n-1], but k256 rejects high-`s`. Substituting `n - s`
+    // negates the signature, which flips the parity of the point `ecrecover` reconstructs from
+    // `r`, so normalizing to low-`s` AND flipping the recovery id recovers exactly the address
+    // the precompile returns for the original `(r, s, v)`.
+    if let Some(low) = ecdsa.normalize_s() {
+        ecdsa = low;
+        rec = RecoveryId::from_byte(rec.to_byte() ^ 1)?;
+    }
     let vk = VerifyingKey::recover_from_prehash(digest, &ecdsa, rec).ok()?;
     Some(address_of(&vk))
 }
@@ -575,11 +590,37 @@ mod tests {
     }
 
     #[test]
+    fn recover_accepts_the_high_s_counterpart() {
+        // ecrecover has no low-s guard: the malleated (r, n - s, flipped v) of a valid
+        // signature recovers the same maker, and `recover` must mirror that.
+        let sk = SigningKey::from_bytes(&[0x42u8; 32].into()).unwrap();
+        let maker = signer_address(&sk);
+        let digest = keccak(b"high-s malleability test digest.");
+        let low = sign_digest(&sk, &digest);
+
+        let high = Sig {
+            r: low.r,
+            s: high_s_counterpart(&low.s),
+            v: if low.v == 27 { 28 } else { 27 },
+        };
+        assert!(is_high_s(&high.s), "counterpart must be high-s");
+        assert_eq!(recover(&digest, &high), Some(maker));
+
+        // The low-s original still recovers, unchanged.
+        assert!(!is_high_s(&low.s));
+        assert_eq!(recover(&digest, &low), Some(maker));
+    }
+
+    #[test]
     fn recover_rejects_malformed_v() {
         let sk = SigningKey::from_bytes(&[0x42u8; 32].into()).unwrap();
         let digest = keccak(b"another 32-byte test digest....");
-        let mut sig = sign_digest(&sk, &digest);
-        sig.v = 26; // below the 27/28 range
-        assert_eq!(recover(&digest, &sig), None);
+        let good = sign_digest(&sk, &digest);
+        // Anything outside 27/28 makes ecrecover yield address(0), i.e. None here.
+        for v in [0u8, 1, 26, 29, 31, 255] {
+            let mut sig = good;
+            sig.v = v;
+            assert_eq!(recover(&digest, &sig), None, "v = {v} must be rejected");
+        }
     }
 }

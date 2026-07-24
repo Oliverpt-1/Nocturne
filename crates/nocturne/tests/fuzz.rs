@@ -190,6 +190,16 @@ proptest! {
         prop_assert_eq!(recover(&digest, &sig), Some(signer));
         prop_assert!(verify(&offer, &root, 0, &proof, &sig, chain_id, &ratifier, &signer));
 
+        // The high-s (malleable) counterpart (r, n - s, flipped v) recovers the same signer,
+        // exactly as on-chain ecrecover does.
+        let malleated = Sig {
+            r: sig.r,
+            s: high_s_counterpart(&sig.s),
+            v: if sig.v == 27 { 28 } else { 27 },
+        };
+        prop_assert_eq!(recover(&digest, &malleated), Some(signer));
+        prop_assert!(verify(&offer, &root, 0, &proof, &malleated, chain_id, &ratifier, &signer));
+
         // Flipping a byte of the offer changes the leaf -> proof no longer matches the root.
         let mut tampered = offer.clone();
         tampered.group[0] ^= 1;
