@@ -63,7 +63,8 @@ fn defaults_are_sane() {
         .ratifier(RATIFIER)
         .max_units(1)
         .build();
-    // side defaults to buy, start to 0, expiry to max, no reduce_only/callback/receiver.
+    // Raw build() skips the side/tick enforcement: side defaults to buy, start to 0, expiry to
+    // max, no reduce_only/callback/receiver.
     assert!(offer.buy);
     assert_eq!(word_to_u128(&offer.start), Some(0));
     assert_eq!(word_to_u256(&offer.expiry), U256::MAX);
@@ -113,6 +114,63 @@ fn try_build_reports_errors() {
     let errs = res.expect_err("expected validation errors");
     assert!(errs.contains(&OfferError::InvalidOfferCaps));
     assert!(errs.contains(&OfferError::TickNotAccessible));
+}
+
+#[test]
+fn try_build_rejects_unset_side() {
+    // Everything else is valid, so the defaulted side is the only complaint.
+    let res = OfferBuilder::new(a_market(), [0x55; 20])
+        .tick(8)
+        .ratifier(RATIFIER)
+        .max_units(1_000_000)
+        .continuous_fee_cap(U256::from(100u64))
+        .try_build(&ctx());
+    let errs = res.expect_err("expected SideNotSet");
+    assert_eq!(errs, vec![OfferError::SideNotSet]);
+}
+
+#[test]
+fn try_build_rejects_unset_tick() {
+    // The tick-0 default passes every on-chain check (0 % spacing == 0), which is exactly why the
+    // builder must flag it: its price rounds to zero.
+    let res = OfferBuilder::new(a_market(), [0x55; 20])
+        .buy()
+        .ratifier(RATIFIER)
+        .max_units(1_000_000)
+        .continuous_fee_cap(U256::from(100u64))
+        .try_build(&ctx());
+    let errs = res.expect_err("expected TickNotSet");
+    assert_eq!(errs, vec![OfferError::TickNotSet]);
+}
+
+#[test]
+fn try_build_accepts_tick_set_via_apr() {
+    // apr() counts as setting the tick (it snaps to the accessible grid itself).
+    let res = OfferBuilder::new(a_market(), [0x55; 20])
+        .lend()
+        .apr(5.0, 1_700_000_000)
+        .ratifier(RATIFIER)
+        .max_units(1_000_000)
+        .continuous_fee_cap(U256::from(100u64))
+        .try_build(&ctx());
+    assert!(res.is_ok(), "expected Ok, got {res:?}");
+}
+
+#[test]
+fn build_checked_rejects_unset_side_then_tick() {
+    let res = OfferBuilder::new(a_market(), [0x55; 20])
+        .tick(8)
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .build_checked();
+    assert_eq!(res.unwrap_err(), BuildError::SideNotSet);
+
+    let res = OfferBuilder::new(a_market(), [0x55; 20])
+        .buy()
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .build_checked();
+    assert_eq!(res.unwrap_err(), BuildError::TickNotSet);
 }
 
 #[test]

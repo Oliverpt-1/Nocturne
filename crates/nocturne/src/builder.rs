@@ -11,9 +11,10 @@ use crate::{
     SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, U256,
 };
 
-/// A conversion failure captured by the ergonomic [`OfferBuilder`] setters ([`apr`](OfferBuilder::apr) /
-/// [`assets`](OfferBuilder::assets)) and surfaced at [`build_checked`](OfferBuilder::build_checked)
-/// time, so those setters never panic.
+/// A builder-usage error surfaced at [`build_checked`](OfferBuilder::build_checked) time: either a
+/// conversion failure captured by the ergonomic [`OfferBuilder`] setters ([`apr`](OfferBuilder::apr) /
+/// [`assets`](OfferBuilder::assets)) - so those setters never panic - or a mandatory field (side /
+/// tick) that was never set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BuildError {
     /// An APR→tick conversion failed (see [`apr_to_tick`](crate::apr_to_tick)).
@@ -25,6 +26,12 @@ pub enum BuildError {
     /// The computed unit count does not fit in the `u128` `maxUnits` field.
     #[error("computed units exceed u128")]
     UnitsOverflow,
+    /// The offer side was never set (via [`side`](OfferBuilder::side) or one of its shorthands).
+    #[error("offer side never set")]
+    SideNotSet,
+    /// The tick was never set (via [`tick`](OfferBuilder::tick) or [`apr`](OfferBuilder::apr)).
+    #[error("offer tick never set")]
+    TickNotSet,
 }
 
 /// Builder for a [`Market`]. Collateral params must be added in ascending token order (the only
@@ -117,7 +124,12 @@ impl MarketBuilder {
 ///
 /// Defaults: `start = 0`, `expiry = u256::MAX` (never expires until set), no callback,
 /// `reduce_only = false`, `continuous_fee_cap = 0`. You must set a side, a tick, a ratifier, and
-/// exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets). A sell offer
+/// exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets).
+/// [`try_build`](Self::try_build) and [`build_checked`](Self::build_checked) reject an offer whose
+/// side or tick was never set: relying on the defaults would sign a buy offer (in `take` the maker
+/// is then the buyer whose approved loan tokens are pulled) at tick 0, whose price rounds to zero
+/// (the `PRICE_ROUNDING_STEP` snap in TickLib.sol), giving the maker's units away for nothing.
+/// Only the raw [`build`](Self::build) escape hatch skips this enforcement. A sell offer
 /// must also set a nonzero [`receiver_if_maker_is_seller`](Self::receiver_if_maker_is_seller):
 /// the zero default is only valid for buy offers - on a sell offer `take` would send the maker's
 /// loan-token proceeds to `address(0)`.
@@ -126,10 +138,12 @@ impl MarketBuilder {
 pub struct OfferBuilder {
     market: Market,
     buy: bool,
+    side_set: bool,
     maker: Address,
     start: U256,
     expiry: U256,
     tick: U256,
+    tick_set: bool,
     group: Word,
     callback: Address,
     callback_data: Vec<u8>,
@@ -148,10 +162,12 @@ impl OfferBuilder {
         Self {
             market,
             buy: true,
+            side_set: false,
             maker,
             start: U256::ZERO,
             expiry: U256::MAX,
             tick: U256::ZERO,
+            tick_set: false,
             group: [0u8; 32],
             callback: [0u8; 20],
             callback_data: Vec::new(),
@@ -175,6 +191,7 @@ impl OfferBuilder {
     /// `buy = true` (maker is the buyer) or `false` (maker is the seller).
     pub fn side(mut self, buy: bool) -> Self {
         self.buy = buy;
+        self.side_set = true;
         self
     }
 
@@ -201,6 +218,7 @@ impl OfferBuilder {
     /// Set the price tick.
     pub fn tick(mut self, tick: u64) -> Self {
         self.tick = U256::from(tick);
+        self.tick_set = true;
         self
     }
 
@@ -289,7 +307,10 @@ impl OfferBuilder {
         let ttm = maturity.saturating_sub(U256::from(now));
         let ttm_secs = u64::try_from(ttm).unwrap_or(u64::MAX);
         match apr_to_tick(apr_pct, ttm_secs, DEFAULT_TICK_SPACING as u64) {
-            Ok(tick) => self.tick = U256::from(tick),
+            Ok(tick) => {
+                self.tick = U256::from(tick);
+                self.tick_set = true;
+            }
             Err(e) => self.record_err(e.into()),
         }
         self
@@ -328,20 +349,28 @@ impl OfferBuilder {
     }
 
     /// Produce the `Offer`, or the first conversion error stored by [`apr`](Self::apr) /
-    /// [`assets`](Self::assets). Unlike [`try_build`](Self::try_build) this does not run offer
-    /// validation; it only reports conversion failures from the ergonomic setters.
+    /// [`assets`](Self::assets), or [`SideNotSet`](BuildError::SideNotSet) /
+    /// [`TickNotSet`](BuildError::TickNotSet) if a mandatory field was left at its default. Unlike
+    /// [`try_build`](Self::try_build) this does not run offer validation.
     pub fn build_checked(self) -> Result<Offer, BuildError> {
         if let Some(e) = self.error {
             return Err(e);
+        }
+        if !self.side_set {
+            return Err(BuildError::SideNotSet);
+        }
+        if !self.tick_set {
+            return Err(BuildError::TickNotSet);
         }
         Ok(self.build())
     }
 
     /// Produce the `Offer` without validating it.
     ///
-    /// Note: this ignores any error stored by [`apr`](Self::apr) / [`assets`](Self::assets); use
-    /// [`build_checked`](Self::build_checked) (or [`try_build`](Self::try_build)) when those setters
-    /// were used.
+    /// Note: this ignores any error stored by [`apr`](Self::apr) / [`assets`](Self::assets) and
+    /// does not enforce that a side or tick was ever set (an unset side builds as buy, an unset
+    /// tick as 0); use [`build_checked`](Self::build_checked) (or [`try_build`](Self::try_build))
+    /// for those guarantees.
     pub fn build(self) -> Offer {
         Offer {
             market: self.market,
@@ -362,10 +391,20 @@ impl OfferBuilder {
         }
     }
 
-    /// Produce the `Offer`, or the list of [`OfferError`]s if it fails validation against `ctx`.
+    /// Produce the `Offer`, or the list of [`OfferError`]s if the side or tick was never set or if
+    /// it fails validation against `ctx`.
     pub fn try_build(self, ctx: &ValidateCtx) -> Result<Offer, Vec<OfferError>> {
+        let mut errs = Vec::new();
+        // The wire `Offer` cannot represent "unset", so these builder-only checks run here rather
+        // than in `validate_offer`.
+        if !self.side_set {
+            errs.push(OfferError::SideNotSet);
+        }
+        if !self.tick_set {
+            errs.push(OfferError::TickNotSet);
+        }
         let offer = self.build();
-        let errs = validate_offer(&offer, ctx);
+        errs.extend(validate_offer(&offer, ctx));
         if errs.is_empty() {
             Ok(offer)
         } else {

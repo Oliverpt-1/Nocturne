@@ -76,6 +76,16 @@ pub enum OfferError {
     CannotIncreaseDebtPostMaturity,
     /// A `reduceOnly` offer would increase the maker's credit (buy) or debt (sell).
     MakerCreditOrDebtIncreased,
+    /// The builder's side was never set. Only emitted by
+    /// [`OfferBuilder::try_build`](crate::OfferBuilder::try_build) - the wire `Offer` cannot
+    /// represent "unset", and silently defaulting to buy would sign a direction-inverted offer
+    /// whose `take` pulls the maker's approved loan tokens (the maker is the buyer).
+    SideNotSet,
+    /// The builder's tick was never set. Only emitted by
+    /// [`OfferBuilder::try_build`](crate::OfferBuilder::try_build): the tick-0 default's price
+    /// rounds to 0 (the `PRICE_ROUNDING_STEP` snap in `TickLib.tickToPrice`), so the maker would
+    /// give units away for zero assets.
+    TickNotSet,
 }
 
 /// A snapshot of live market state, if the maker has one to validate against.
