@@ -125,6 +125,26 @@ fn buy_offer_must_have_zero_maker_receiver() {
 }
 
 #[test]
+fn sell_offer_must_have_nonzero_maker_receiver() {
+    // `take` accepts a zero receiver on a sell offer (it only checks the unused side), but the
+    // maker's proceeds would go to address(0), so it's a stateless reject.
+    let mut o = good_offer();
+    o.buy = false;
+    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::SellerReceiverZero));
+
+    // A nonzero receiver makes the sell offer fully valid.
+    let mut o = good_offer();
+    o.buy = false;
+    o.receiver_if_maker_is_seller = [0x99; 20];
+    assert_eq!(validate_offer(&o, &good_ctx()), vec![]);
+
+    // The rule is sell-side only: a buy offer keeps the zero receiver (and must, per
+    // `buy_offer_must_have_zero_maker_receiver`).
+    let o = good_offer();
+    assert!(!validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::SellerReceiverZero));
+}
+
+#[test]
 fn zero_ratifier_is_rejected() {
     // A zero ratifier can never be authorized on-chain, so it's a stateless reject.
     let mut o = good_offer();

@@ -5,7 +5,7 @@
 //! instead of discovering it when a taker's `take` reverts on the critical path.
 //!
 //! Checks split by what they need:
-//! - **Stateless** (from the offer alone): caps, tick range, receiver rule, nonzero ratifier,
+//! - **Stateless** (from the offer alone): caps, tick range, receiver rules, nonzero ratifier,
 //!   market structure, `start <= expiry`.
 //! - **Context** (from a [`ValidateCtx`] the maker fills in as far as it can): chain id, midnight
 //!   address, current time, and a live-market snapshot (tick spacing, loss factor, continuous fee).
@@ -36,6 +36,10 @@ pub enum OfferError {
     StartAfterExpiry,
     /// `buy` offer must leave `receiverIfMakerIsSeller` zero (the maker is the buyer).
     UnusedReceiverMustBeZero,
+    /// Sell offer with a zero `receiverIfMakerIsSeller`. `take` accepts it (on-chain the
+    /// zero-receiver rule only covers the *unused* side), but the maker's loan-token proceeds are
+    /// sent to `address(0)` - burned, or the transfer reverts and the offer is untakeable.
+    SellerReceiverZero,
     /// `ratifier` is the zero address, which can never be authorized, so `take` always reverts
     /// `RatifierUnauthorized`. Only the stateless zero case is caught here; whether a nonzero
     /// ratifier is actually authorized (`isAuthorized[maker][ratifier]`) needs chain state.
@@ -153,6 +157,12 @@ pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
     }
     if offer.buy && offer.receiver_if_maker_is_seller != [0u8; 20] {
         errs.push(OfferError::UnusedReceiverMustBeZero);
+    }
+    // `take` doesn't reject this (it only requires the unused side's receiver to be zero), but a
+    // sell offer's seller proceeds go to `receiverIfMakerIsSeller`, so a zero receiver sends the
+    // maker's assets to `address(0)`.
+    if !offer.buy && offer.receiver_if_maker_is_seller == [0u8; 20] {
+        errs.push(OfferError::SellerReceiverZero);
     }
     // `isAuthorized[maker][address(0)]` is always false, so a zero ratifier is a guaranteed
     // `RatifierUnauthorized` revert regardless of chain state.

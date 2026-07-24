@@ -115,9 +115,12 @@ impl MarketBuilder {
 
 /// Builder for an [`Offer`].
 ///
-/// Defaults: `start = 0`, `expiry = u256::MAX` (never expires until set), no callback, no
-/// receiver, `reduce_only = false`, `continuous_fee_cap = 0`. You must set a side, a tick, a
-/// ratifier, and exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets).
+/// Defaults: `start = 0`, `expiry = u256::MAX` (never expires until set), no callback,
+/// `reduce_only = false`, `continuous_fee_cap = 0`. You must set a side, a tick, a ratifier, and
+/// exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets). A sell offer
+/// must also set a nonzero [`receiver_if_maker_is_seller`](Self::receiver_if_maker_is_seller):
+/// the zero default is only valid for buy offers - on a sell offer `take` would send the maker's
+/// loan-token proceeds to `address(0)`.
 #[derive(Clone, Debug)]
 #[must_use = "call `.build()` or `.try_build(..)` to produce the Offer"]
 pub struct OfferBuilder {
@@ -238,7 +241,8 @@ impl OfferBuilder {
         self
     }
 
-    /// Set the receiver used when the maker is the seller (must stay zero for buy offers).
+    /// Set the receiver of the maker's proceeds when the maker is the seller (must stay zero for
+    /// buy offers, must be nonzero for sell offers - `address(0)` would receive the proceeds).
     pub fn receiver_if_maker_is_seller(mut self, receiver: Address) -> Self {
         self.receiver_if_maker_is_seller = receiver;
         self
