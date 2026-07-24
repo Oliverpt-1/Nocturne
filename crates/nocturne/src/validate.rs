@@ -14,7 +14,10 @@
 //! runs the stateless subset. Consumption headroom (which depends on take amounts) is exposed
 //! separately via [`consumption_headroom`] / [`can_consume`].
 
-use crate::{word_from_u128 as w128, word_to_u128, Address, Offer};
+use crate::{word_from_u128 as w128, word_to_u128, word_to_u256, Address, Offer, U256};
+
+/// `WAD` in ConstantsLib.sol.
+const WAD: u128 = 1_000_000_000_000_000_000; // 1e18
 
 /// Highest tick `TickLib.tickToPrice` accepts (`MAX_TICK` in TickLib.sol).
 pub const MAX_TICK: u64 = 6744;
@@ -48,8 +51,15 @@ pub enum OfferError {
     NoCollateralParams,
     /// Market has more than `MAX_COLLATERALS` collateral params.
     TooManyCollateralParams,
-    /// Collateral params are not strictly sorted ascending by token address.
+    /// Collateral params are not strictly sorted ascending by token address. `touchMarket` starts
+    /// its `previousCollateralToken` at `address(0)`, so the first token must itself be nonzero.
     CollateralParamsNotSorted,
+    /// A collateral param's `maxLif(lltv, liquidationCursor)` exceeds `2 * WAD` - or the `maxLif`
+    /// computation itself reverts (checked-arithmetic panic), which is folded in here since the
+    /// market can never be created either way.
+    InvalidMaxLif,
+    /// A collateral param has `lltv < WAD` with `lltv * maxLif > 0.999e18 * WAD`.
+    MaxLifTooHigh,
     /// `market.chainId` does not match the expected chain id.
     InvalidChainId,
     /// `market.midnight` does not match the expected Midnight address.
@@ -150,6 +160,16 @@ pub fn can_consume(offer: &Offer, consumed_so_far: u128, amount: u128) -> bool {
     }
 }
 
+/// `ConstantsLib.maxLif`: `mulDivDown(WAD, WAD, WAD - mulDivDown(liquidationCursor, WAD - lltv,
+/// WAD))`, every division rounding down. `None` where the Solidity computation reverts under 0.8
+/// checked arithmetic: `lltv > WAD` underflows `WAD - lltv`, a huge cursor overflows the inner
+/// product or underflows the denominator, and a denominator of exactly zero divides by zero.
+fn max_lif(lltv: U256, cursor: U256) -> Option<U256> {
+    let wad = U256::from(WAD);
+    let inner = cursor.checked_mul(wad.checked_sub(lltv)?)? / wad;
+    (wad * wad).checked_div(wad.checked_sub(inner)?)
+}
+
 /// Validate an offer, returning **every** problem found (empty vec = acceptable). Collecting all
 /// errors lets a maker fix a whole grid in one pass rather than one revert at a time.
 pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
@@ -187,8 +207,41 @@ pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
     if cps.len() > MAX_COLLATERALS {
         errs.push(OfferError::TooManyCollateralParams);
     }
-    if cps.windows(2).any(|w| w[1].token <= w[0].token) {
+    // `touchMarket` initializes `previousCollateralToken` to address(0) and requires
+    // `collateralToken > previousCollateralToken` for every element, so the first token must be
+    // nonzero and the rest strictly ascending.
+    if cps.first().is_some_and(|cp| cp.token == [0u8; 20])
+        || cps.windows(2).any(|w| w[1].token <= w[0].token)
+    {
         errs.push(OfferError::CollateralParamsNotSorted);
+    }
+    // `touchMarket`'s pure per-param LIF checks: `maxLif(lltv, liquidationCursor) <= 2 * WAD`
+    // (`InvalidMaxLif`) and `lltv == WAD || lltv * maxLif <= 0.999 ether * WAD` (`MaxLifTooHigh`).
+    // The stateful `isLltvEnabled` / `isLiquidationCursorEnabled` gates need chain state and are
+    // not mirrored here.
+    let wad = U256::from(WAD);
+    let mut invalid_max_lif = false;
+    let mut max_lif_too_high = false;
+    for cp in cps {
+        let lltv = word_to_u256(&cp.lltv);
+        match max_lif(lltv, word_to_u256(&cp.liquidation_cursor)) {
+            None => invalid_max_lif = true,
+            Some(ml) => {
+                if ml > U256::from(2 * WAD) {
+                    invalid_max_lif = true;
+                }
+                // `Some` implies `lltv <= WAD` and `ml <= WAD*WAD`, so the product cannot overflow.
+                if lltv != wad && lltv * ml > U256::from(999_000_000_000_000_000u128 * WAD) {
+                    max_lif_too_high = true;
+                }
+            }
+        }
+    }
+    if invalid_max_lif {
+        errs.push(OfferError::InvalidMaxLif);
+    }
+    if max_lif_too_high {
+        errs.push(OfferError::MaxLifTooHigh);
     }
 
     // ---- context: identity ----

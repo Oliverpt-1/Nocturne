@@ -183,6 +183,82 @@ fn collateral_structure() {
 }
 
 #[test]
+fn first_collateral_token_must_be_nonzero() {
+    // `touchMarket` starts `previousCollateralToken` at address(0) and requires strict ascent
+    // from there, so a zero first token fails even though every adjacent pair is sorted.
+    let mut o = good_offer();
+    o.market.collateral_params[0].token = [0u8; 20];
+    let mut cp2 = o.market.collateral_params[0].clone();
+    cp2.token = [0x33; 20]; // > 0x00, so the windows(2) pair alone is fine
+    o.market.collateral_params.push(cp2);
+    assert!(validate_offer(&o, &ValidateCtx::default())
+        .contains(&OfferError::CollateralParamsNotSorted));
+
+    // A normal nonzero-first sorted list passes (the good offer's single 0x33 collateral).
+    assert!(!validate_offer(&good_offer(), &ValidateCtx::default())
+        .contains(&OfferError::CollateralParamsNotSorted));
+}
+
+#[test]
+fn max_lif_too_high() {
+    // lltv = 0.5e18, cursor = 0.999e18: maxLif = 1e36 / (1e18 - 0.999e18*0.5e18/1e18)
+    // = 1e36 / 0.5005e18 ~= 1.998e18 <= 2*WAD, but lltv * maxLif ~= 0.999001e36 > 0.999e36.
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(500_000_000_000_000_000);
+    o.market.collateral_params[0].liquidation_cursor = u256(999_000_000_000_000_000);
+    let errs = validate_offer(&o, &ValidateCtx::default());
+    assert!(errs.contains(&OfferError::MaxLifTooHigh));
+    assert!(!errs.contains(&OfferError::InvalidMaxLif));
+}
+
+#[test]
+fn invalid_max_lif() {
+    // lltv = 0.2e18, cursor = 0.7e18: maxLif = 1e36 / (1e18 - 0.7e18*0.8e18/1e18)
+    // = 1e36 / 0.44e18 ~= 2.27e18 > 2*WAD. The product check still passes (0.4545e36 <= 0.999e36).
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(200_000_000_000_000_000);
+    o.market.collateral_params[0].liquidation_cursor = u256(700_000_000_000_000_000);
+    let errs = validate_offer(&o, &ValidateCtx::default());
+    assert!(errs.contains(&OfferError::InvalidMaxLif));
+    assert!(!errs.contains(&OfferError::MaxLifTooHigh));
+}
+
+#[test]
+fn max_lif_reverting_computation_is_invalid() {
+    // lltv = 0, cursor = WAD: the denominator WAD - cursor*(WAD-lltv)/WAD is exactly 0, so the
+    // on-chain maxLif divides by zero.
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(0);
+    o.market.collateral_params[0].liquidation_cursor = u256(1_000_000_000_000_000_000);
+    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::InvalidMaxLif));
+
+    // lltv > WAD: WAD - lltv underflows on-chain.
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(1_000_000_000_000_000_001);
+    assert!(validate_offer(&o, &ValidateCtx::default()).contains(&OfferError::InvalidMaxLif));
+}
+
+#[test]
+fn typical_lltv_cursor_passes_max_lif_checks() {
+    // lltv = 0.8e18, cursor = 0.5e18: maxLif = 1e36 / 0.9e18 ~= 1.111e18 <= 2*WAD and
+    // lltv * maxLif ~= 0.889e36 <= 0.999e36 - fully valid.
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(800_000_000_000_000_000);
+    o.market.collateral_params[0].liquidation_cursor = u256(500_000_000_000_000_000);
+    assert_eq!(validate_offer(&o, &good_ctx()), vec![]);
+}
+
+#[test]
+fn lltv_of_wad_skips_product_check() {
+    // lltv == WAD: maxLif = WAD for any cursor (WAD - lltv = 0), and the lltv * maxLif clause is
+    // short-circuited by `lltv == WAD`, so even an aggressive cursor is fine.
+    let mut o = good_offer();
+    o.market.collateral_params[0].lltv = u256(1_000_000_000_000_000_000);
+    o.market.collateral_params[0].liquidation_cursor = u256(999_000_000_000_000_000);
+    assert_eq!(validate_offer(&o, &good_ctx()), vec![]);
+}
+
+#[test]
 fn identity_checks() {
     let o = good_offer();
     let mut ctx = good_ctx();
