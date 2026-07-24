@@ -56,6 +56,16 @@ fn tree_build_errors_instead_of_panicking() {
 }
 
 #[test]
+fn tree_build_rejects_trees_taller_than_the_onchain_cap() {
+    // HashLib.offerTreeTypeHash reverts TreeTooHigh above height 20, so 2^21 leaves must be
+    // rejected up front rather than producing a tree no ratifier will ever accept.
+    assert_eq!(
+        OfferTree::build(vec![[0u8; 32]; 1 << (MAX_TREE_HEIGHT + 1)]),
+        Err(TreeError::TooHigh(MAX_TREE_HEIGHT + 1))
+    );
+}
+
+#[test]
 fn offer_serde_roundtrips_and_preserves_hash() {
     let offer = sample_offer();
     let json = serde_json::to_string(&offer).unwrap();

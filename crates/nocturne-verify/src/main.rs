@@ -226,9 +226,18 @@ fn cmd_verify(
         "offer leaf is under the signed Merkle root",
     );
 
-    // 2. Recompute the EIP-712 digest and recover the signer.
-    let digest = tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier);
-    let signer = recover(&digest, &rd.sig);
+    // 2. The tree fits the on-chain cap: HashLib.offerTreeTypeHash reverts TreeTooHigh above
+    //    height 20, so a longer proof can never ratify and has no digest to sign.
+    let height_ok = rd.proof.len() <= MAX_TREE_HEIGHT;
+    check(
+        &mut ok,
+        height_ok,
+        "proof height is at most 20 (TreeTooHigh)",
+    );
+
+    // 3. Recompute the EIP-712 digest and recover the signer.
+    let digest = height_ok.then(|| tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier));
+    let signer = digest.and_then(|d| recover(&d, &rd.sig));
     let signer_is_maker = signer.as_ref() == Some(&offer.maker);
     check(
         &mut ok,
@@ -240,7 +249,9 @@ fn cmd_verify(
     } else {
         println!("      recovered signer  : (invalid signature)");
     }
-    println!("      digest            : {}", render::hex_bytes(&digest));
+    if let Some(d) = digest {
+        println!("      digest            : {}", render::hex_bytes(&d));
+    }
     // Malleability note: on-chain ecrecover (and therefore `recover`) accepts a high-s
     // signature, but low-s tooling may reject or rewrite it - flag it even on a PASS.
     if signer.is_some() && is_high_s(&rd.sig.s) {
@@ -250,7 +261,7 @@ fn cmd_verify(
         );
     }
 
-    // 3. Optional explicit maker assertion.
+    // 4. Optional explicit maker assertion.
     if let Some(exp) = expected_maker {
         let exp_addr = parse_addr(exp)?;
         check(
@@ -260,7 +271,7 @@ fn cmd_verify(
         );
     }
 
-    // 4. Cross-check: if a chain id was supplied, it should match the offer's own.
+    // 5. Cross-check: if a chain id was supplied, it should match the offer's own.
     if let Some(id) = chain_id {
         let matches = offer.market.chain_id == word_from_u64(id);
         check(

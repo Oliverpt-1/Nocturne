@@ -157,6 +157,70 @@ fn verify_fails_for_wrong_expected_maker() {
 }
 
 #[test]
+fn verify_fails_for_proof_taller_than_onchain_cap() {
+    // HashLib.offerTreeTypeHash reverts TreeTooHigh above height 20, so a 21-element proof can
+    // never ratify - the tool must FAIL, not PASS. Fold the leaf up under zero siblings for a
+    // consistent (root, proof) without materializing a 2^21 tree.
+    let signer = LocalSigner::from_bytes(&[0x42; 32]).unwrap();
+    let offer = offer_for(signer.address());
+    let proof = vec![[0u8; 32]; MAX_TREE_HEIGHT + 1];
+    let mut root = hash_offer(&offer);
+    for sib in &proof {
+        root = hash_node(&root, sib);
+    }
+    // No digest exists for height 21 (tree_digest would panic), so any signature does.
+    let sig = signer.sign_digest(&keccak(b"no such digest")).unwrap();
+    let rd = encode_ratifier_data(&sig, &root, 0, &proof);
+    let calldata = encode_take_calldata(
+        &offer,
+        &rd,
+        U256::from(250_000u64),
+        &[0x77; 20],
+        &[0x88; 20],
+        &[0u8; 20],
+        &[],
+    );
+    let payload = format!("0x{}", hex::encode(&calldata));
+    let (stdout, _err, code) = run(&["verify", &payload, "--chain-id", "31337"]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+    assert!(stdout.contains("TreeTooHigh"), "{stdout}");
+}
+
+#[test]
+fn verify_fails_for_out_of_range_leaf_index() {
+    // HashLib.isLeaf reverts LeafIndexOutOfRange unless leafIndex >> proof.length == 0. On a
+    // single-leaf tree the empty proof folds identically for any index, so only the range
+    // check separates index 2 (reverts on-chain) from index 0 (passes).
+    let signer = LocalSigner::from_bytes(&[0x42; 32]).unwrap();
+    let offer = offer_for(signer.address());
+    let chain_id = word_from_u64(31337);
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    let sig = signer
+        .sign_digest(&tree_digest(
+            tree.root(),
+            tree.height(),
+            chain_id,
+            &offer.ratifier,
+        ))
+        .unwrap();
+    let rd = encode_ratifier_data(&sig, &tree.root(), 2, &tree.proof(0));
+    let calldata = encode_take_calldata(
+        &offer,
+        &rd,
+        U256::from(250_000u64),
+        &[0x77; 20],
+        &[0x88; 20],
+        &[0u8; 20],
+        &[],
+    );
+    let payload = format!("0x{}", hex::encode(&calldata));
+    let (stdout, _err, code) = run(&["verify", &payload, "--chain-id", "31337"]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+}
+
+#[test]
 fn digest_matches_and_mismatches() {
     let (_hex, offer, _) = signed_take();
     let dir = std::env::temp_dir();

@@ -84,6 +84,10 @@ pub enum TreeError {
     /// The leaf set is empty or not a power of two.
     #[error("leaf count must be a nonzero power of two, got {0}")]
     NotPowerOfTwo(usize),
+    /// The tree is taller than [`MAX_TREE_HEIGHT`], which `HashLib.offerTreeTypeHash` rejects
+    /// on-chain with `TreeTooHigh`.
+    #[error("tree height must be at most 20, got {0}")]
+    TooHigh(usize),
 }
 
 pub type Word = [u8; 32];
@@ -176,7 +180,17 @@ pub fn offer_typehash() -> Word {
             .as_bytes(),
     )
 }
+/// The tallest offer tree `HashLib.offerTreeTypeHash` has a constant for; above this the
+/// contract reverts `TreeTooHigh`, so no taller tree can ever ratify.
+pub const MAX_TREE_HEIGHT: usize = 20;
+
+/// Panics if `height` exceeds [`MAX_TREE_HEIGHT`], where `HashLib.offerTreeTypeHash` reverts
+/// `TreeTooHigh`.
 pub fn offer_tree_typehash(height: usize) -> Word {
+    assert!(
+        height <= MAX_TREE_HEIGHT,
+        "tree height {height} exceeds {MAX_TREE_HEIGHT} (HashLib.offerTreeTypeHash reverts TreeTooHigh)"
+    );
     let mut field = String::from("OfferTree(Offer");
     for _ in 0..height {
         field.push_str("[2]");
@@ -270,10 +284,15 @@ pub struct OfferTree {
 }
 
 impl OfferTree {
-    /// Build a perfect binary tree over `leaves`. Errors unless the count is a nonzero power of two.
+    /// Build a perfect binary tree over `leaves`. Errors unless the count is a nonzero power of
+    /// two of at most `2^MAX_TREE_HEIGHT` - `HashLib.offerTreeTypeHash` reverts `TreeTooHigh`
+    /// above height 20, so a taller tree could never ratify.
     pub fn build(leaves: Vec<Word>) -> Result<Self, TreeError> {
         if leaves.is_empty() || !leaves.len().is_power_of_two() {
             return Err(TreeError::NotPowerOfTwo(leaves.len()));
+        }
+        if leaves.len() > 1 << MAX_TREE_HEIGHT {
+            return Err(TreeError::TooHigh(leaves.len().trailing_zeros() as usize));
         }
         let mut levels = vec![leaves];
         while levels.last().unwrap().len() > 1 {
@@ -307,8 +326,16 @@ impl OfferTree {
     }
 }
 
-/// Recompute the root from a leaf + proof, exactly as `HashLib.isLeaf` does on-chain.
+/// Recompute the root from a leaf + proof, exactly as `HashLib.isLeaf` does on-chain -
+/// including its leaf-index range check, whose `LeafIndexOutOfRange` revert is `false` here.
 pub fn verify_leaf(root: &Word, leaf: &Word, leaf_index: usize, proof: &[Word]) -> bool {
+    // HashLib.isLeaf requires leafIndex >> proof.length == 0: high bits beyond the proof are
+    // never consumed by the fold, so an index outside [0, 2^len) could otherwise "verify"
+    // off-chain and then revert on-chain. (A shift past usize::BITS - well-defined on the
+    // contract's uint256 - always yields 0, i.e. in range.)
+    if leaf_index.checked_shr(proof.len() as u32).unwrap_or(0) != 0 {
+        return false;
+    }
     let mut cur = *leaf;
     for (i, sib) in proof.iter().enumerate() {
         cur = if (leaf_index >> i) & 1 == 0 {
@@ -329,6 +356,8 @@ pub fn domain_separator(chain_id: Word, ratifier: &Address) -> Word {
 }
 
 /// The digest the maker signs for a whole tree (one signature covers every offer in it).
+///
+/// Panics if `height` exceeds [`MAX_TREE_HEIGHT`] (via [`offer_tree_typehash`]).
 pub fn tree_digest(root: Word, height: usize, chain_id: Word, ratifier: &Address) -> Word {
     let struct_hash = keccak(&encode(&[offer_tree_typehash(height), root]));
     let mut buf = Vec::with_capacity(2 + 64);
@@ -420,6 +449,11 @@ pub fn verify(
     ratifier: &Address,
     expected_maker: &Address,
 ) -> bool {
+    // The ratifier calls HashLib.offerTreeTypeHash(proof.length), which reverts TreeTooHigh
+    // above MAX_TREE_HEIGHT - such a take can never pass (and there is no digest to rebuild).
+    if proof.len() > MAX_TREE_HEIGHT {
+        return false;
+    }
     let leaf = hash_offer(offer);
     if !verify_leaf(root, &leaf, leaf_index, proof) {
         return false;
@@ -586,6 +620,69 @@ mod tests {
             word_u64(999),
             &ratifier,
             &maker
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "TreeTooHigh")]
+    fn offer_tree_typehash_panics_above_max_height() {
+        // HashLib.offerTreeTypeHash has constants for heights 0-20 only and reverts TreeTooHigh
+        // above that; there is no typehash to compute.
+        offer_tree_typehash(MAX_TREE_HEIGHT + 1);
+    }
+
+    #[test]
+    fn verify_leaf_rejects_out_of_range_leaf_index() {
+        // HashLib.isLeaf reverts LeafIndexOutOfRange unless leafIndex >> proof.length == 0.
+        // Index 2 folds exactly like index 0 on a height-1 tree (bit 1 is never consumed), so
+        // without the range check it would "verify" off-chain and then revert on-chain.
+        let leaves = vec![keccak(b"a"), keccak(b"b")];
+        let tree = OfferTree::build(leaves.clone()).unwrap();
+        let proof = tree.proof(0);
+        assert!(verify_leaf(&tree.root(), &leaves[0], 0, &proof));
+        assert!(!verify_leaf(&tree.root(), &leaves[0], 2, &proof));
+
+        // Same on the single-leaf tree (empty proof): any nonzero index is out of range.
+        let one = OfferTree::build(vec![keccak(b"a")]).unwrap();
+        assert!(verify_leaf(&one.root(), &keccak(b"a"), 0, &[]));
+        assert!(!verify_leaf(&one.root(), &keccak(b"a"), 1, &[]));
+    }
+
+    #[test]
+    fn verify_rejects_proofs_taller_than_max_height() {
+        let sk = SigningKey::from_bytes(&[0x07u8; 32].into()).unwrap();
+        let maker = signer_address(&sk);
+        let ratifier = [0xbbu8; 20];
+        let chain_id = word_u64(1);
+        let offer = tiny_offer(maker, 0);
+        let leaf = hash_offer(&offer);
+
+        // Fold the leaf up under zero siblings: a consistent (root, proof) of any height
+        // without materializing a 2^height tree.
+        let fold = |height: usize| {
+            let proof = vec![[0u8; 32]; height];
+            let mut root = leaf;
+            for sib in &proof {
+                root = hash_node(&root, sib);
+            }
+            (root, proof)
+        };
+
+        // Height 20 is the on-chain cap and still verifies end to end.
+        let (root, proof) = fold(MAX_TREE_HEIGHT);
+        let sig = sign_digest(
+            &sk,
+            &tree_digest(root, MAX_TREE_HEIGHT, chain_id, &ratifier),
+        );
+        assert!(verify(
+            &offer, &root, 0, &proof, &sig, chain_id, &ratifier, &maker
+        ));
+
+        // One level higher the ratifier reverts TreeTooHigh, so verify must say false
+        // (whatever the signature - there is no digest a maker could even sign).
+        let (root, proof) = fold(MAX_TREE_HEIGHT + 1);
+        assert!(!verify(
+            &offer, &root, 0, &proof, &sig, chain_id, &ratifier, &maker
         ));
     }
 
