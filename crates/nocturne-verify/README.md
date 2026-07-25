@@ -59,6 +59,20 @@ agree. Output ends with one of three verdicts:
 Both known ratifier-data layouts are detected automatically: the EcrecoverRatifier's
 `(Signature, root, leafIndex, proof)` and the SetterRatifier's `(root, leafIndex, proof)`.
 
+**Maker side — verifying a `setIsRootRatified` transaction.** A SetterRatifier maker authorizes
+a whole offer tree by confirming a transaction whose calldata is just `(maker, root, true)` — a
+bare 32-byte root the wallet cannot explain. Verify it against your own intended terms:
+
+```sh
+# PASS proves the root commits to exactly these offers, and nothing else:
+nocturne-verify verify 0x2fd0e45d... --offers offer1.json offer2.json ...
+# equivalent root-only check from the digest side:
+nocturne-verify digest offer1.json offer2.json --expect-root 0xRootFromWallet
+```
+
+Without `--offers` the payload is decoded and reported PARTIAL — a bare root cannot be verified
+by itself. Offer order matters: it sets the leaf indices.
+
 ### `decode` — read any payload in plain terms
 
 ```sh
