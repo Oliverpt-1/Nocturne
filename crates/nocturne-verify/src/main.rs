@@ -35,8 +35,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Decode a raw payload (take calldata, offer, ratifier data, or a getter return) into
-    /// human-readable terms.
+    /// Decode a raw payload (take or bundle calldata, offer, ratifier data, or a getter
+    /// return) into human-readable terms.
     Decode {
         /// The payload as hex (`0x`-prefixed or not).
         payload: String,
@@ -50,10 +50,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Verify a `take` payload: reproduce the signed Merkle root and confirm the signature
-    /// recovers to the offer's maker. Exits non-zero if any check fails.
+    /// Verify a `take` or bundle payload: reproduce the signed Merkle root(s) and confirm
+    /// each signature recovers to its offer's maker. Exits non-zero if any check fails.
     Verify {
-        /// The `take` calldata as hex.
+        /// The `take` or bundle calldata as hex.
         payload: String,
         /// Chain id for the EIP-712 domain (defaults to the offer's `market.chainId`).
         #[arg(long)]
@@ -89,6 +89,7 @@ enum Command {
 #[derive(Clone, Copy, ValueEnum)]
 enum PayloadType {
     Take,
+    Bundle,
     Offer,
     Ratifier,
     Cancel,
@@ -155,6 +156,15 @@ fn cmd_decode(
                 print!("{}", render::take_text(&t, now));
             }
         }
+        PayloadType::Bundle => {
+            let b = decode_bundle_calldata(&bytes).map_err(bundle_err)?;
+            if json {
+                print_json(&render::bundle_json(&b));
+            } else {
+                println!("Decoded Midnight bundle payload\n");
+                print!("{}", render::bundle_text(&b, now));
+            }
+        }
         PayloadType::Offer => {
             let o = decode_offer(&bytes).map_err(|e| e.to_string())?;
             if json {
@@ -200,10 +210,89 @@ fn cmd_verify(
     now: Option<u64>,
 ) -> Result<ExitCode, String> {
     let bytes = parse_hex(payload)?;
+    if bytes.len() >= 4
+        && BundleKind::from_selector([bytes[0], bytes[1], bytes[2], bytes[3]]).is_some()
+    {
+        return cmd_verify_bundle(&bytes, chain_id, expected_maker, now);
+    }
     let t = decode_take_calldata(&bytes).map_err(|e| e.to_string())?;
-    let rd = &t.ratifier_data;
-    let offer = &t.offer;
 
+    println!("Verifying Midnight take(...) payload\n");
+    print!("{}", render::take_text(&t, now));
+    println!("\nchecks:");
+
+    let mut ok = true;
+    verify_offer_checks(
+        &t.offer,
+        &t.ratifier_data,
+        chain_id,
+        expected_maker,
+        &mut ok,
+    )?;
+
+    println!();
+    if ok {
+        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+fn cmd_verify_bundle(
+    bytes: &[u8],
+    chain_id: Option<u64>,
+    expected_maker: Option<&str>,
+    now: Option<u64>,
+) -> Result<ExitCode, String> {
+    let b = decode_bundle_calldata(bytes).map_err(bundle_err)?;
+
+    println!("Verifying Midnight bundle payload\n");
+    print!("{}", render::bundle_summary_text(&b));
+
+    if b.fills.is_empty() {
+        println!("\nRESULT: FAIL - bundle contains no fills (nothing to verify).");
+        return Ok(ExitCode::FAILURE);
+    }
+
+    let mut ok = true;
+    for (i, fill) in b.fills.iter().enumerate() {
+        println!("\nfill[{i}]:");
+        print!("{}", render::fill_text(fill, now));
+        println!("\nchecks (fill[{i}]):");
+        verify_offer_checks(
+            &fill.offer,
+            &fill.ratifier_data,
+            chain_id,
+            expected_maker,
+            &mut ok,
+        )?;
+    }
+
+    println!();
+    if ok {
+        println!(
+            "RESULT: PASS - all {} fill signatures authorize exactly the offers shown above.",
+            b.fills.len()
+        );
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+/// The per-offer verification core shared by bare takes and bundle fills: leaf membership,
+/// tree-height cap, digest reconstruction + signer recovery, and the optional
+/// `--expected-maker` / `--chain-id` assertions. Failures clear `ok`.
+fn verify_offer_checks(
+    offer: &Offer,
+    rd: &RatifierData,
+    chain_id: Option<u64>,
+    expected_maker: Option<&str>,
+    ok: &mut bool,
+) -> Result<(), String> {
     // Chain id: explicit flag wins; otherwise trust the offer's own market.chainId.
     let chain_id_word = match chain_id {
         Some(id) => word_from_u64(id),
@@ -211,36 +300,22 @@ fn cmd_verify(
     };
     let ratifier = offer.ratifier;
 
-    println!("Verifying Midnight take(...) payload\n");
-    print!("{}", render::take_text(&t, now));
-    println!("\nchecks:");
-
-    let mut ok = true;
-
     // 1. The offer's leaf sits under the signed root at the claimed index.
     let leaf = hash_offer(offer);
     let leaf_ok = verify_leaf(&rd.root, &leaf, rd.leaf_index, &rd.proof);
-    check(
-        &mut ok,
-        leaf_ok,
-        "offer leaf is under the signed Merkle root",
-    );
+    check(ok, leaf_ok, "offer leaf is under the signed Merkle root");
 
     // 2. The tree fits the on-chain cap: HashLib.offerTreeTypeHash reverts TreeTooHigh above
     //    height 20, so a longer proof can never ratify and has no digest to sign.
     let height_ok = rd.proof.len() <= MAX_TREE_HEIGHT;
-    check(
-        &mut ok,
-        height_ok,
-        "proof height is at most 20 (TreeTooHigh)",
-    );
+    check(ok, height_ok, "proof height is at most 20 (TreeTooHigh)");
 
     // 3. Recompute the EIP-712 digest and recover the signer.
     let digest = height_ok.then(|| tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier));
     let signer = digest.and_then(|d| recover(&d, &rd.sig));
     let signer_is_maker = signer.as_ref() == Some(&offer.maker);
     check(
-        &mut ok,
+        ok,
         signer_is_maker,
         "signature recovers to the offer's maker",
     );
@@ -265,7 +340,7 @@ fn cmd_verify(
     if let Some(exp) = expected_maker {
         let exp_addr = parse_addr(exp)?;
         check(
-            &mut ok,
+            ok,
             signer.as_ref() == Some(&exp_addr),
             "recovered signer equals --expected-maker",
         );
@@ -274,21 +349,9 @@ fn cmd_verify(
     // 5. Cross-check: if a chain id was supplied, it should match the offer's own.
     if let Some(id) = chain_id {
         let matches = offer.market.chain_id == word_from_u64(id);
-        check(
-            &mut ok,
-            matches,
-            "--chain-id matches the offer's market.chainId",
-        );
+        check(ok, matches, "--chain-id matches the offer's market.chainId");
     }
-
-    println!();
-    if ok {
-        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
-        Ok(ExitCode::SUCCESS)
-    } else {
-        println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
-        Ok(ExitCode::FAILURE)
-    }
+    Ok(())
 }
 
 fn cmd_digest(
@@ -383,6 +446,9 @@ fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
         if sel == CANCEL_ROOT_SELECTOR {
             return Ok(PayloadType::Cancel);
         }
+        if BundleKind::from_selector(sel).is_some() {
+            return Ok(PayloadType::Bundle);
+        }
     }
     if decode_offer(bytes).is_ok() {
         return Ok(PayloadType::Offer);
@@ -392,6 +458,18 @@ fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
          market-state/position have no selector and must be specified)"
             .to_string(),
     )
+}
+
+/// Decode-error message for bundle payloads, with a hint for the common truncated-copy case
+/// (a bundle whose ABI offsets point past its own end).
+fn bundle_err(e: DecodeError) -> String {
+    match e {
+        DecodeError::TooShort { .. } => format!(
+            "{e} - the bundle's ABI offsets point past the payload end, so the hex was likely \
+             truncated when copied; fetch the complete calldata and retry"
+        ),
+        e => e.to_string(),
+    }
 }
 
 fn print_json(v: &serde_json::Value) {

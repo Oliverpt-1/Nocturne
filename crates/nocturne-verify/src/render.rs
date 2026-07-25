@@ -267,6 +267,124 @@ pub fn take_text(t: &TakeCall, now: Option<u64>) -> String {
     s
 }
 
+/// Human label for a `TokenPermit`.
+fn permit_str(p: &TokenPermit) -> String {
+    let kind = match p.kind {
+        0 => "none".to_string(),
+        1 => "ERC2612".to_string(),
+        2 => "Permit2".to_string(),
+        k => format!("unknown({k})"),
+    };
+    if p.data.is_empty() {
+        kind
+    } else {
+        format!("{kind} ({} bytes)", p.data.len())
+    }
+}
+
+/// A `U256` with a timestamp reading when it fits in `u64`.
+fn u256_ts(v: &U256) -> String {
+    match u64::try_from(*v) {
+        Ok(ts) => format!("{v} ({})", fmt_ts(ts)),
+        Err(_) => format!("{v} (large)"),
+    }
+}
+
+/// Render a bundle's wrapper arguments (everything except the fills themselves).
+///
+/// These are taker-side execution bounds, NOT covered by any maker signature - rendered so a
+/// taker can eyeball what their own transaction does around the fills.
+pub fn bundle_summary_text(b: &BundleCall) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("bundle ({}):\n", b.kind.function_name()));
+    s.push_str(&format!("  fills               : {}\n", b.fills.len()));
+    s.push_str(&format!("  taker               : {}\n", checksum(&b.taker)));
+    s.push_str(&format!("  reduce only         : {}\n", b.reduce_only));
+    s.push_str(&format!("  {:<20}: {}\n", b.kind.target_label(), b.target));
+    s.push_str(&format!("  {:<20}: {}\n", b.kind.limit_label(), b.limit));
+    match &b.side {
+        BundleSide::Buy {
+            loan_token_permit,
+            collateral_withdrawals,
+            collateral_receiver,
+        } => {
+            s.push_str(&format!(
+                "  loan token permit   : {}\n",
+                permit_str(loan_token_permit)
+            ));
+            s.push_str(&format!(
+                "  collateral withdrawals : {}\n",
+                collateral_withdrawals.len()
+            ));
+            for (i, w) in collateral_withdrawals.iter().enumerate() {
+                s.push_str(&format!(
+                    "    [{i}] index={} assets={}\n",
+                    w.collateral_index, w.assets
+                ));
+            }
+            s.push_str(&format!(
+                "  collateral receiver : {}\n",
+                checksum(collateral_receiver)
+            ));
+        }
+        BundleSide::Sell {
+            receiver,
+            collateral_supplies,
+        } => {
+            s.push_str(&format!("  receiver            : {}\n", checksum(receiver)));
+            s.push_str(&format!(
+                "  collateral supplies : {}\n",
+                collateral_supplies.len()
+            ));
+            for (i, c) in collateral_supplies.iter().enumerate() {
+                s.push_str(&format!(
+                    "    [{i}] index={} assets={} permit={}\n",
+                    c.collateral_index,
+                    c.assets,
+                    permit_str(&c.permit)
+                ));
+            }
+        }
+    }
+    s.push_str(&format!("  referral fee pct    : {}\n", b.referral_fee_pct));
+    if b.referral_fee_pct != U256::ZERO {
+        s.push_str(&format!(
+            "  referral recipient  : {}\n",
+            checksum(&b.referral_fee_recipient)
+        ));
+    }
+    s.push_str(&format!(
+        "  max continuous fee  : {}\n",
+        b.max_continuous_fee
+    ));
+    s.push_str(&format!(
+        "  deadline            : {}\n",
+        u256_ts(&b.deadline)
+    ));
+    s
+}
+
+/// Render one embedded fill (offer + ratifier data + units).
+pub fn fill_text(fill: &OfferFill, now: Option<u64>) -> String {
+    let mut s = String::new();
+    s.push_str("offer:\n");
+    s.push_str(&offer_text(&fill.offer, now));
+    s.push_str("ratifier data:\n");
+    s.push_str(&ratifier_text(&fill.ratifier_data));
+    s.push_str(&format!("  units               : {}\n", fill.units));
+    s
+}
+
+/// Render a decoded bundle call: wrapper summary followed by every fill.
+pub fn bundle_text(b: &BundleCall, now: Option<u64>) -> String {
+    let mut s = bundle_summary_text(b);
+    for (i, fill) in b.fills.iter().enumerate() {
+        s.push_str(&format!("\nfill[{i}]:\n"));
+        s.push_str(&fill_text(fill, now));
+    }
+    s
+}
+
 // ---- JSON builders -----------------------------------------------------------
 
 pub fn offer_json(o: &Offer) -> Value {
@@ -322,6 +440,51 @@ pub fn take_json(t: &TakeCall) -> Value {
         "receiverIfTakerIsSeller": checksum(&t.receiver_if_taker_is_seller),
         "takerCallback": checksum(&t.taker_callback),
         "takerCallbackData": hex_bytes(&t.taker_callback_data),
+    })
+}
+
+pub fn bundle_json(b: &BundleCall) -> Value {
+    let side = match &b.side {
+        BundleSide::Buy {
+            loan_token_permit,
+            collateral_withdrawals,
+            collateral_receiver,
+        } => json!({
+            "loanTokenPermit": { "kind": loan_token_permit.kind, "data": hex_bytes(&loan_token_permit.data) },
+            "collateralWithdrawals": collateral_withdrawals.iter().map(|w| json!({
+                "collateralIndex": w.collateral_index.to_string(),
+                "assets": w.assets.to_string(),
+            })).collect::<Vec<_>>(),
+            "collateralReceiver": checksum(collateral_receiver),
+        }),
+        BundleSide::Sell {
+            receiver,
+            collateral_supplies,
+        } => json!({
+            "receiver": checksum(receiver),
+            "collateralSupplies": collateral_supplies.iter().map(|c| json!({
+                "collateralIndex": c.collateral_index.to_string(),
+                "assets": c.assets.to_string(),
+                "permit": { "kind": c.permit.kind, "data": hex_bytes(&c.permit.data) },
+            })).collect::<Vec<_>>(),
+        }),
+    };
+    json!({
+        "function": b.kind.function_name(),
+        "target": b.target.to_string(),
+        "limit": b.limit.to_string(),
+        "taker": checksum(&b.taker),
+        "reduceOnly": b.reduce_only,
+        "side": side,
+        "fills": b.fills.iter().map(|f| json!({
+            "offer": offer_json(&f.offer),
+            "ratifierData": ratifier_json(&f.ratifier_data),
+            "units": f.units.to_string(),
+        })).collect::<Vec<_>>(),
+        "referralFeePct": b.referral_fee_pct.to_string(),
+        "referralFeeRecipient": checksum(&b.referral_fee_recipient),
+        "maxContinuousFee": b.max_continuous_fee.to_string(),
+        "deadline": b.deadline.to_string(),
     })
 }
 

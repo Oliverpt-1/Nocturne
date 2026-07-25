@@ -309,3 +309,139 @@ fn render_addr(a: &Address) -> String {
     }
     out
 }
+
+// ---- bundle payloads -----------------------------------------------------------
+
+/// Returns (bundle-calldata hex, both offers, maker) for a 2-fill BuyWithAssetsTarget bundle
+/// signed over one 2-leaf tree. With `tamper`, fill[1]'s offer tick is changed AFTER signing,
+/// so its leaf no longer sits under the signed root.
+fn signed_bundle(tamper: bool) -> (String, [Offer; 2], Address) {
+    let signer = LocalSigner::from_bytes(&[0x42; 32]).unwrap();
+    let mut offers = [offer_for(signer.address()), offer_for(signer.address())];
+    offers[1].tick = word_from_u64(3376);
+    let chain_id = word_from_u64(31337);
+    let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
+    let sig = signer
+        .sign_digest(&tree_digest(
+            tree.root(),
+            tree.height(),
+            chain_id,
+            &offers[0].ratifier,
+        ))
+        .unwrap();
+    if tamper {
+        offers[1].tick = word_from_u64(1000);
+    }
+    let fills = offers
+        .iter()
+        .enumerate()
+        .map(|(i, offer)| {
+            let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i));
+            OfferFill {
+                offer: offer.clone(),
+                ratifier_data: decode_ratifier_data(&raw).unwrap(),
+                ratifier_data_raw: raw,
+                units: U256::from(100_000u64),
+            }
+        })
+        .collect();
+    let bundle = BundleCall {
+        kind: BundleKind::BuyWithAssetsTarget,
+        target: U256::from(500_000u64),
+        limit: U256::from(501_570u64),
+        taker: [0x77; 20],
+        reduce_only: false,
+        side: BundleSide::Buy {
+            loan_token_permit: TokenPermit {
+                kind: 0,
+                data: Vec::new(),
+            },
+            collateral_withdrawals: Vec::new(),
+            collateral_receiver: [0x88; 20],
+        },
+        fills,
+        referral_fee_pct: U256::ZERO,
+        referral_fee_recipient: [0u8; 20],
+        max_continuous_fee: U256::MAX,
+        deadline: U256::from(4_000_000_000u64),
+    };
+    (
+        format!("0x{}", hex::encode(encode_bundle_calldata(&bundle))),
+        offers,
+        signer.address(),
+    )
+}
+
+#[test]
+fn decode_bundle_shows_wrapper_and_fills() {
+    let (hex, _offers, _) = signed_bundle(false);
+    let (stdout, _err, code) = run(&["decode", &hex]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(
+        stdout.contains("bundle (midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("fills               : 2"), "{stdout}");
+    assert!(stdout.contains("fill[1]:"), "{stdout}");
+    assert!(stdout.contains("target buyer assets : 500000"), "{stdout}");
+    assert!(stdout.contains("min units           : 501570"), "{stdout}");
+}
+
+#[test]
+fn decode_bundle_json_is_valid_json() {
+    let (hex, _offers, _) = signed_bundle(false);
+    let (stdout, _err, code) = run(&["decode", &hex, "--json"]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(
+        v["function"],
+        "midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral"
+    );
+    assert_eq!(v["fills"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn verify_bundle_passes_and_checks_every_fill() {
+    let (hex, _offers, signer) = signed_bundle(false);
+    let (stdout, _err, code) = run(&["verify", &hex, "--chain-id", "31337"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("checks (fill[0]):"), "{stdout}");
+    assert!(stdout.contains("checks (fill[1]):"), "{stdout}");
+    assert!(
+        stdout.contains("RESULT: PASS - all 2 fill signatures"),
+        "{stdout}"
+    );
+    assert!(stdout.contains(&render_addr(&signer)), "{stdout}");
+}
+
+#[test]
+fn verify_bundle_fails_when_one_fill_is_tampered() {
+    // fill[0] is intact, fill[1]'s tick was changed after signing: one bad fill must fail the
+    // whole bundle.
+    let (hex, _offers, _) = signed_bundle(true);
+    let (stdout, _err, code) = run(&["verify", &hex, "--chain-id", "31337"]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+    // The intact fill still shows its passing leaf check before the tampered one fails.
+    assert!(
+        stdout.contains("[PASS] offer leaf is under the signed Merkle root"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("[FAIL] offer leaf is under the signed Merkle root"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn truncated_bundle_payload_errors_with_hint() {
+    // Real production payload whose tail was lost in copy-paste: the tool must refuse it with
+    // a truncation hint, never report on a partial bundle.
+    let payload = include_str!("../../nocturne/tests/data/truncated_bundle.hex").trim();
+    for cmd in ["decode", "verify"] {
+        let (stdout, stderr, code) = run(&[cmd, payload]);
+        assert_eq!(code, 1, "{cmd}: {stdout}{stderr}");
+        assert!(stderr.contains("truncated"), "{cmd}: {stderr}");
+        assert!(!stdout.contains("RESULT: PASS"), "{cmd}: {stdout}");
+    }
+}
