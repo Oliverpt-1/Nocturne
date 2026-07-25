@@ -304,12 +304,18 @@ fn verdict(ok: bool, partial: bool, fills: usize) -> ExitCode {
              command(s) above to complete the verification."
         );
         ExitCode::from(2)
-    } else if fills == 1 {
-        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
-        ExitCode::SUCCESS
     } else {
+        if fills == 1 {
+            println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
+        } else {
+            println!(
+                "RESULT: PASS - all {fills} fill signatures authorize exactly the offers shown \
+                 above."
+            );
+        }
         println!(
-            "RESULT: PASS - all {fills} fill signatures authorize exactly the offers shown above."
+            "        The tool has proven the payload matches the terms shown; only YOU can \
+             check the terms match the trade you intend. Read them before proceeding."
         );
         ExitCode::SUCCESS
     }
@@ -648,6 +654,10 @@ fn cmd_verify_typed(
             "RESULT: PASS - signing this typed data authorizes exactly the {} offer(s) shown \
              above, and nothing else.",
             real.len()
+        );
+        println!(
+            "        The tool has proven the bytes match the terms shown; only YOU can check \
+             the terms match your intent. Read them before signing."
         );
         Ok(ExitCode::SUCCESS)
     } else {
