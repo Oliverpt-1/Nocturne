@@ -214,7 +214,7 @@ pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
     s
 }
 
-/// Render decoded ratifier data (signature, root, leaf index, proof).
+/// Render decoded EcrecoverRatifier data (signature, root, leaf index, proof).
 pub fn ratifier_text(rd: &RatifierData) -> String {
     let mut s = String::new();
     s.push_str(&format!(
@@ -238,13 +238,39 @@ pub fn ratifier_text(rd: &RatifierData) -> String {
     s
 }
 
+/// Render decoded SetterRatifier data (root, leaf index, proof - no signature).
+pub fn setter_ratifier_text(rd: &SetterRatifierData) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "  root                : {}\n",
+        hex_bytes(&rd.root)
+    ));
+    s.push_str(&format!("  leaf index          : {}\n", rd.leaf_index));
+    s.push_str(&format!("  tree height         : {}\n", rd.proof.len()));
+    s.push_str(
+        "  signature           : (none - SetterRatifier; the maker ratifies the root on-chain)\n",
+    );
+    for (i, p) in rd.proof.iter().enumerate() {
+        s.push_str(&format!("  proof[{i}]            : {}\n", hex_bytes(p)));
+    }
+    s
+}
+
+/// Render ratifier data in either layout.
+pub fn ratifier_payload_text(rd: &RatifierPayload) -> String {
+    match rd {
+        RatifierPayload::Ecrecover(rd) => ratifier_text(rd),
+        RatifierPayload::Setter(rd) => setter_ratifier_text(rd),
+    }
+}
+
 /// Render a decoded `take` call.
 pub fn take_text(t: &TakeCall, now: Option<u64>) -> String {
     let mut s = String::new();
     s.push_str("offer:\n");
     s.push_str(&offer_text(&t.offer, now));
     s.push_str("ratifier data:\n");
-    s.push_str(&ratifier_text(&t.ratifier_data));
+    s.push_str(&ratifier_payload_text(&t.ratifier_data));
     s.push_str("taker args:\n");
     s.push_str(&format!("  units               : {}\n", t.units));
     s.push_str(&format!("  taker               : {}\n", checksum(&t.taker)));
@@ -370,7 +396,7 @@ pub fn fill_text(fill: &OfferFill, now: Option<u64>) -> String {
     s.push_str("offer:\n");
     s.push_str(&offer_text(&fill.offer, now));
     s.push_str("ratifier data:\n");
-    s.push_str(&ratifier_text(&fill.ratifier_data));
+    s.push_str(&ratifier_payload_text(&fill.ratifier_data));
     s.push_str(&format!("  units               : {}\n", fill.units));
     s
 }
@@ -423,6 +449,7 @@ pub fn offer_json(o: &Offer) -> Value {
 
 pub fn ratifier_json(rd: &RatifierData) -> Value {
     json!({
+        "type": "ecrecover",
         "signature": { "v": rd.sig.v, "r": hex_bytes(&rd.sig.r), "s": hex_bytes(&rd.sig.s) },
         "root": hex_bytes(&rd.root),
         "leafIndex": rd.leaf_index,
@@ -431,10 +458,27 @@ pub fn ratifier_json(rd: &RatifierData) -> Value {
     })
 }
 
+pub fn setter_ratifier_json(rd: &SetterRatifierData) -> Value {
+    json!({
+        "type": "setter",
+        "root": hex_bytes(&rd.root),
+        "leafIndex": rd.leaf_index,
+        "treeHeight": rd.proof.len(),
+        "proof": rd.proof.iter().map(|p| hex_bytes(p)).collect::<Vec<_>>(),
+    })
+}
+
+pub fn ratifier_payload_json(rd: &RatifierPayload) -> Value {
+    match rd {
+        RatifierPayload::Ecrecover(rd) => ratifier_json(rd),
+        RatifierPayload::Setter(rd) => setter_ratifier_json(rd),
+    }
+}
+
 pub fn take_json(t: &TakeCall) -> Value {
     json!({
         "offer": offer_json(&t.offer),
-        "ratifierData": ratifier_json(&t.ratifier_data),
+        "ratifierData": ratifier_payload_json(&t.ratifier_data),
         "units": t.units.to_string(),
         "taker": checksum(&t.taker),
         "receiverIfTakerIsSeller": checksum(&t.receiver_if_taker_is_seller),
@@ -478,7 +522,7 @@ pub fn bundle_json(b: &BundleCall) -> Value {
         "side": side,
         "fills": b.fills.iter().map(|f| json!({
             "offer": offer_json(&f.offer),
-            "ratifierData": ratifier_json(&f.ratifier_data),
+            "ratifierData": ratifier_payload_json(&f.ratifier_data),
             "units": f.units.to_string(),
         })).collect::<Vec<_>>(),
         "referralFeePct": b.referral_fee_pct.to_string(),

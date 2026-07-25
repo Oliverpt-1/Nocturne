@@ -339,7 +339,7 @@ fn signed_bundle(tamper: bool) -> (String, [Offer; 2], Address) {
             let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i));
             OfferFill {
                 offer: offer.clone(),
-                ratifier_data: decode_ratifier_data(&raw).unwrap(),
+                ratifier_data: decode_any_ratifier_data(&raw).unwrap(),
                 ratifier_data_raw: raw,
                 units: U256::from(100_000u64),
             }
@@ -424,11 +424,11 @@ fn verify_bundle_fails_when_one_fill_is_tampered() {
     assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
     // The intact fill still shows its passing leaf check before the tampered one fails.
     assert!(
-        stdout.contains("[PASS] offer leaf is under the signed Merkle root"),
+        stdout.contains("[PASS] offer leaf is under the claimed Merkle root"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("[FAIL] offer leaf is under the signed Merkle root"),
+        stdout.contains("[FAIL] offer leaf is under the claimed Merkle root"),
         "{stdout}"
     );
 }
@@ -444,4 +444,77 @@ fn truncated_bundle_payload_errors_with_hint() {
         assert!(stderr.contains("truncated"), "{cmd}: {stderr}");
         assert!(!stdout.contains("RESULT: PASS"), "{cmd}: {stdout}");
     }
+}
+
+// ---- SetterRatifier payloads ----------------------------------------------------
+
+/// A take whose ratifierData uses the SetterRatifier layout (root, leafIndex, proof - no
+/// signature). With `tamper`, the offer tick is changed after the tree was built.
+fn setter_take(tamper: bool) -> String {
+    let mut offer = offer_for([0x42; 20]);
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    if tamper {
+        offer.tick = word_from_u64(1000);
+    }
+    let rd = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0));
+    let calldata = encode_take_calldata(
+        &offer,
+        &rd,
+        U256::from(250_000u64),
+        &[0x77; 20],
+        &[0x88; 20],
+        &[0u8; 20],
+        &[],
+    );
+    format!("0x{}", hex::encode(&calldata))
+}
+
+#[test]
+fn verify_setter_take_is_partial_with_onchain_pointer() {
+    let payload = setter_take(false);
+    let (stdout, _err, code) = run(&["verify", &payload, "--chain-id", "31337"]);
+    assert_eq!(code, 2, "{stdout}");
+    assert!(stdout.contains("RESULT: PARTIAL"), "{stdout}");
+    assert!(stdout.contains("no signature travels"), "{stdout}");
+    assert!(
+        stdout.contains("cast call") && stdout.contains("isRootRatified(address,bytes32)(bool)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("[PASS] offer leaf is under the claimed Merkle root"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn verify_tampered_setter_take_fails() {
+    let payload = setter_take(true);
+    let (stdout, _err, code) = run(&["verify", &payload, "--chain-id", "31337"]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+    assert!(
+        stdout.contains("[FAIL] offer leaf is under the claimed Merkle root"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn verify_production_setter_bundle_is_partial() {
+    // The complete production bundle (6 SetterRatifier fills on Base) that motivated setter
+    // support: every fill's terms and Merkle membership must verify, the verdict must be
+    // PARTIAL (root ratification lives on-chain), and each fill must get a cast pointer.
+    let payload = include_str!("../../nocturne/tests/data/setter_bundle_full.hex").trim();
+    let (stdout, _err, code) = run(&["verify", payload]);
+    assert_eq!(code, 2, "{stdout}");
+    assert!(stdout.contains("fills               : 6"), "{stdout}");
+    assert_eq!(
+        stdout
+            .matches("[PASS] offer leaf is under the claimed Merkle root")
+            .count(),
+        6,
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("cast call").count(), 6, "{stdout}");
+    assert!(!stdout.contains("[FAIL]"), "{stdout}");
+    assert!(stdout.contains("RESULT: PARTIAL"), "{stdout}");
 }

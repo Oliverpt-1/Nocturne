@@ -175,12 +175,12 @@ fn cmd_decode(
             }
         }
         PayloadType::Ratifier => {
-            let rd = decode_ratifier_data(&bytes).map_err(|e| e.to_string())?;
+            let rd = decode_any_ratifier_data(&bytes).map_err(|e| e.to_string())?;
             if json {
-                print_json(&render::ratifier_json(&rd));
+                print_json(&render::ratifier_payload_json(&rd));
             } else {
                 println!("Decoded ratifier data\n");
-                print!("{}", render::ratifier_text(&rd));
+                print!("{}", render::ratifier_payload_text(&rd));
             }
         }
         PayloadType::Cancel => {
@@ -222,21 +222,42 @@ fn cmd_verify(
     println!("\nchecks:");
 
     let mut ok = true;
+    let mut partial = false;
     verify_offer_checks(
         &t.offer,
         &t.ratifier_data,
         chain_id,
         expected_maker,
         &mut ok,
+        &mut partial,
     )?;
 
     println!();
-    if ok {
-        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
-        Ok(ExitCode::SUCCESS)
-    } else {
+    Ok(verdict(ok, partial, 1))
+}
+
+/// Print the overall RESULT line and pick the exit code: 0 when every check passed, 1 when
+/// something failed, 2 when nothing failed but SetterRatifier data leaves the on-chain root
+/// ratification check open (offline tools cannot read contract state).
+fn verdict(ok: bool, partial: bool, fills: usize) -> ExitCode {
+    if !ok {
         println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
-        Ok(ExitCode::FAILURE)
+        ExitCode::FAILURE
+    } else if partial {
+        println!(
+            "RESULT: PARTIAL - terms and Merkle membership verified, but SetterRatifier root \
+             ratification is on-chain state this tool cannot check offline. Run the cast \
+             command(s) above to complete the verification."
+        );
+        ExitCode::from(2)
+    } else if fills == 1 {
+        println!("RESULT: PASS - this signature authorizes exactly the offer shown above.");
+        ExitCode::SUCCESS
+    } else {
+        println!(
+            "RESULT: PASS - all {fills} fill signatures authorize exactly the offers shown above."
+        );
+        ExitCode::SUCCESS
     }
 }
 
@@ -257,6 +278,7 @@ fn cmd_verify_bundle(
     }
 
     let mut ok = true;
+    let mut partial = false;
     for (i, fill) in b.fills.iter().enumerate() {
         println!("\nfill[{i}]:");
         print!("{}", render::fill_text(fill, now));
@@ -267,31 +289,25 @@ fn cmd_verify_bundle(
             chain_id,
             expected_maker,
             &mut ok,
+            &mut partial,
         )?;
     }
 
     println!();
-    if ok {
-        println!(
-            "RESULT: PASS - all {} fill signatures authorize exactly the offers shown above.",
-            b.fills.len()
-        );
-        Ok(ExitCode::SUCCESS)
-    } else {
-        println!("RESULT: FAIL - do NOT trust this payload; see failed checks above.");
-        Ok(ExitCode::FAILURE)
-    }
+    Ok(verdict(ok, partial, b.fills.len()))
 }
 
 /// The per-offer verification core shared by bare takes and bundle fills: leaf membership,
-/// tree-height cap, digest reconstruction + signer recovery, and the optional
-/// `--expected-maker` / `--chain-id` assertions. Failures clear `ok`.
+/// tree-height cap, then per-layout authorization - digest reconstruction + signer recovery
+/// for EcrecoverRatifier data, or the on-chain root-ratification pointer for SetterRatifier
+/// data (which carries no signature; sets `partial`). Failures clear `ok`.
 fn verify_offer_checks(
     offer: &Offer,
-    rd: &RatifierData,
+    rd: &RatifierPayload,
     chain_id: Option<u64>,
     expected_maker: Option<&str>,
     ok: &mut bool,
+    partial: &mut bool,
 ) -> Result<(), String> {
     // Chain id: explicit flag wins; otherwise trust the offer's own market.chainId.
     let chain_id_word = match chain_id {
@@ -300,50 +316,82 @@ fn verify_offer_checks(
     };
     let ratifier = offer.ratifier;
 
-    // 1. The offer's leaf sits under the signed root at the claimed index.
+    // 1. The offer's leaf sits under the claimed root at the claimed index.
     let leaf = hash_offer(offer);
-    let leaf_ok = verify_leaf(&rd.root, &leaf, rd.leaf_index, &rd.proof);
-    check(ok, leaf_ok, "offer leaf is under the signed Merkle root");
+    let leaf_ok = verify_leaf(rd.root(), &leaf, rd.leaf_index(), rd.proof());
+    check(ok, leaf_ok, "offer leaf is under the claimed Merkle root");
 
     // 2. The tree fits the on-chain cap: HashLib.offerTreeTypeHash reverts TreeTooHigh above
     //    height 20, so a longer proof can never ratify and has no digest to sign.
-    let height_ok = rd.proof.len() <= MAX_TREE_HEIGHT;
+    let height_ok = rd.proof().len() <= MAX_TREE_HEIGHT;
     check(ok, height_ok, "proof height is at most 20 (TreeTooHigh)");
 
-    // 3. Recompute the EIP-712 digest and recover the signer.
-    let digest = height_ok.then(|| tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier));
-    let signer = digest.and_then(|d| recover(&d, &rd.sig));
-    let signer_is_maker = signer.as_ref() == Some(&offer.maker);
-    check(
-        ok,
-        signer_is_maker,
-        "signature recovers to the offer's maker",
-    );
-    if let Some(s) = signer {
-        println!("      recovered signer  : {}", render::checksum(&s));
-    } else {
-        println!("      recovered signer  : (invalid signature)");
-    }
-    if let Some(d) = digest {
-        println!("      digest            : {}", render::hex_bytes(&d));
-    }
-    // Malleability note: on-chain ecrecover (and therefore `recover`) accepts a high-s
-    // signature, but low-s tooling may reject or rewrite it - flag it even on a PASS.
-    if signer.is_some() && is_high_s(&rd.sig.s) {
-        println!(
-            "  [WARN] signature is high-s (malleable, not low-s normalized); \
-             on-chain ecrecover accepts it"
-        );
-    }
+    match rd {
+        RatifierPayload::Ecrecover(rd) => {
+            // 3. Recompute the EIP-712 digest and recover the signer.
+            let digest =
+                height_ok.then(|| tree_digest(rd.root, rd.proof.len(), chain_id_word, &ratifier));
+            let signer = digest.and_then(|d| recover(&d, &rd.sig));
+            let signer_is_maker = signer.as_ref() == Some(&offer.maker);
+            check(
+                ok,
+                signer_is_maker,
+                "signature recovers to the offer's maker",
+            );
+            if let Some(s) = signer {
+                println!("      recovered signer  : {}", render::checksum(&s));
+            } else {
+                println!("      recovered signer  : (invalid signature)");
+            }
+            if let Some(d) = digest {
+                println!("      digest            : {}", render::hex_bytes(&d));
+            }
+            // Malleability note: on-chain ecrecover (and therefore `recover`) accepts a high-s
+            // signature, but low-s tooling may reject or rewrite it - flag it even on a PASS.
+            if signer.is_some() && is_high_s(&rd.sig.s) {
+                println!(
+                    "  [WARN] signature is high-s (malleable, not low-s normalized); \
+                     on-chain ecrecover accepts it"
+                );
+            }
 
-    // 4. Optional explicit maker assertion.
-    if let Some(exp) = expected_maker {
-        let exp_addr = parse_addr(exp)?;
-        check(
-            ok,
-            signer.as_ref() == Some(&exp_addr),
-            "recovered signer equals --expected-maker",
-        );
+            // 4. Optional explicit maker assertion.
+            if let Some(exp) = expected_maker {
+                let exp_addr = parse_addr(exp)?;
+                check(
+                    ok,
+                    signer.as_ref() == Some(&exp_addr),
+                    "recovered signer equals --expected-maker",
+                );
+            }
+        }
+        RatifierPayload::Setter(rd) => {
+            // 3. SetterRatifier data carries no signature: `isRatified` instead requires
+            //    isRootRatified[offer.maker][root] == true, which is contract storage this
+            //    offline tool cannot read. Point at the exact call that completes the check.
+            *partial = true;
+            println!("  [INFO] SetterRatifier data: no signature travels with this payload");
+            println!(
+                "  [INFO] authorization is on-chain state; complete the check with:\n\
+                 \x20        cast call {} \"isRootRatified(address,bytes32)(bool)\" {} {} \\\n\
+                 \x20          --rpc-url <chain-{} rpc>",
+                render::checksum(&ratifier),
+                render::checksum(&offer.maker),
+                render::hex_bytes(&rd.root),
+                word_to_u256(&offer.market.chain_id),
+            );
+
+            // 4. Optional explicit maker assertion: with no signer to recover, assert the
+            //    offer's maker field itself (that is whose ratification binds on-chain).
+            if let Some(exp) = expected_maker {
+                let exp_addr = parse_addr(exp)?;
+                check(
+                    ok,
+                    offer.maker == exp_addr,
+                    "offer maker equals --expected-maker",
+                );
+            }
+        }
     }
 
     // 5. Cross-check: if a chain id was supplied, it should match the offer's own.
