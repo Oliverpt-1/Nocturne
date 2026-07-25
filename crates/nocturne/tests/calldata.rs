@@ -264,3 +264,50 @@ fn truncated_calldata_errors_not_panics() {
     // Shorter than a selector.
     assert!(decode_take_calldata(&[0x6a, 0x14]).is_err());
 }
+
+#[test]
+fn set_is_root_ratified_round_trips() {
+    let root = keccak(b"root");
+    let calldata = encode_set_is_root_ratified_calldata(&[0x42; 20], &root, true);
+    assert_eq!(calldata[..4], SET_IS_ROOT_RATIFIED_SELECTOR);
+    let d = decode_set_is_root_ratified_calldata(&calldata).unwrap();
+    assert_eq!(
+        d,
+        RatifyCall {
+            maker: [0x42; 20],
+            root,
+            ratified: true,
+        }
+    );
+    // The unratify direction too.
+    let revoke = encode_set_is_root_ratified_calldata(&[0x42; 20], &root, false);
+    assert!(
+        !decode_set_is_root_ratified_calldata(&revoke)
+            .unwrap()
+            .ratified
+    );
+}
+
+#[test]
+fn production_ratify_calldata_decodes() {
+    // A real SetterRatifier.setIsRootRatified transaction from Base (tx 0x0901ae10...,
+    // block 48891514), sent by the maker itself and carrying the app's trailing metadata
+    // tag - the root matches fill[0] of the production bundle fixture.
+    let hex_str = include_str!("data/setter_ratify_prod.hex");
+    let bytes = hex::decode(hex_str.trim().trim_start_matches("0x")).unwrap();
+    let d = decode_set_is_root_ratified_calldata(&bytes).unwrap();
+    let maker: Address = [
+        0xd4, 0x18, 0x22, 0x4a, 0xe3, 0xc5, 0x10, 0xb6, 0x45, 0x11, 0x2f, 0xd9, 0x27, 0x5c, 0xcf,
+        0xd5, 0x0f, 0x99, 0x6e, 0xe4,
+    ];
+    assert_eq!(d.maker, maker);
+    assert!(d.ratified);
+
+    // Cross-fixture anchor: the ratified root is exactly the root claimed by fill[0] of the
+    // production taker bundle.
+    let bundle_hex = include_str!("data/setter_bundle_full.hex");
+    let bundle =
+        decode_bundle_calldata(&hex::decode(bundle_hex.trim().trim_start_matches("0x")).unwrap())
+            .unwrap();
+    assert_eq!(*bundle.fills[0].ratifier_data.root(), d.root);
+}

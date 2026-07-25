@@ -929,6 +929,30 @@ pub fn decode_cancel_root_calldata(bytes: &[u8]) -> Result<(Address, Word), Deco
     Ok((maker, root))
 }
 
+/// A decoded `SetterRatifier.setIsRootRatified` call - the transaction a maker confirms to
+/// (un)ratify a whole offer tree on-chain. The inverse of
+/// [`encode_set_is_root_ratified_calldata`](crate::encode_set_is_root_ratified_calldata).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RatifyCall {
+    /// The maker whose trees are being (un)ratified.
+    pub maker: Address,
+    /// The Merkle root of the offer tree.
+    pub root: Word,
+    /// `true` ratifies the root, `false` revokes it.
+    pub ratified: bool,
+}
+
+/// Decode raw `SetterRatifier.setIsRootRatified(address, bytes32, bool)` calldata. Trailing
+/// metadata bytes appended by apps are tolerated.
+pub fn decode_set_is_root_ratified_calldata(bytes: &[u8]) -> Result<RatifyCall, DecodeError> {
+    let args = strip_selector(bytes, crate::SET_IS_ROOT_RATIFIED_SELECTOR)?;
+    Ok(RatifyCall {
+        maker: word_to_address(&head_word(args, 0, 0)?),
+        root: head_word(args, 0, 1)?,
+        ratified: word_to_bool(&head_word(args, 0, 2)?)?,
+    })
+}
+
 /// Verify the leading 4-byte selector and return the ABI-args slice that follows it.
 fn strip_selector(bytes: &[u8], expected: [u8; 4]) -> Result<&[u8], DecodeError> {
     if bytes.len() < 4 {

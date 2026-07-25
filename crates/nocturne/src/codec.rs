@@ -13,6 +13,9 @@ use crate::{Address, Offer, Sig, Word, U256};
 pub const TAKE_SELECTOR: [u8; 4] = [0x6a, 0x14, 0xc9, 0xef];
 /// `EcrecoverRatifier.cancelRoot(address,bytes32)` selector.
 pub const CANCEL_ROOT_SELECTOR: [u8; 4] = [0xbb, 0x1f, 0x12, 0xaa];
+/// `SetterRatifier.setIsRootRatified(address,bytes32,bool)` selector (`cast sig`-derived and
+/// cross-checked against a production ratification transaction on Base).
+pub const SET_IS_ROOT_RATIFIED_SELECTOR: [u8; 4] = [0x2f, 0xd0, 0xe4, 0x5d];
 
 // `IMidnightBundlesV1` fill-function selectors, derived with `cast sig` from the vendored
 // interface (morpho-apps `IMidnightBundles.sol`); the BuyWithAssetsTarget selector is also
@@ -342,6 +345,24 @@ pub fn encode_cancel_root_calldata(maker: &Address, root: &Word) -> Vec<u8> {
     let args = encode_sequence(&[Value::Word(addr_word(maker)), Value::Word(*root)]);
     let mut out = Vec::with_capacity(4 + args.len());
     out.extend_from_slice(&CANCEL_ROOT_SELECTOR);
+    out.extend(args);
+    out
+}
+
+/// `SetterRatifier.setIsRootRatified.selector ++ abi.encode(maker, root, newIsRootRatified)` -
+/// the transaction a maker confirms to (un)ratify a whole offer tree on-chain.
+pub fn encode_set_is_root_ratified_calldata(
+    maker: &Address,
+    root: &Word,
+    ratified: bool,
+) -> Vec<u8> {
+    let args = encode_sequence(&[
+        Value::Word(addr_word(maker)),
+        Value::Word(*root),
+        Value::Word(bool_word(ratified)),
+    ]);
+    let mut out = Vec::with_capacity(4 + args.len());
+    out.extend_from_slice(&SET_IS_ROOT_RATIFIED_SELECTOR);
     out.extend(args);
     out
 }
