@@ -46,13 +46,18 @@ nocturne-verify verify 0xa85d52e5...
 ```
 
 The chain id defaults to the offer's own `market.chainId`; pass `--chain-id` to also assert they
-agree. Output ends with either:
+agree. Output ends with one of three verdicts:
 
-```
-RESULT: PASS - this signature authorizes exactly the offer shown above.
-```
+- `RESULT: PASS` (exit 0) — every check passed, including signature recovery.
+- `RESULT: FAIL` (exit 1) — do not trust the payload; the failing checks are listed.
+- `RESULT: PARTIAL` (exit 2) — terms and Merkle membership verified, but the payload uses the
+  **SetterRatifier**, which carries no signature: the maker authorizes the whole tree on-chain
+  via `setIsRootRatified` instead. Contract storage cannot be read offline, so the tool prints
+  the exact `cast call <ratifier> "isRootRatified(address,bytes32)(bool)" <maker> <root>`
+  command per fill to complete the verification against an RPC.
 
-or a `FAIL` with the failing checks listed.
+Both known ratifier-data layouts are detected automatically: the EcrecoverRatifier's
+`(Signature, root, leafIndex, proof)` and the SetterRatifier's `(root, leafIndex, proof)`.
 
 ### `decode` — read any payload in plain terms
 
