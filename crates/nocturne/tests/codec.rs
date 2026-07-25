@@ -226,7 +226,9 @@ fn decode_take_calldata_matches_solidity() {
     assert_eq!(decoded.taker_callback, addr(0xee));
     assert_eq!(decoded.taker_callback_data, vec![0xca, 0xfe]);
 
-    let rd = &decoded.ratifier_data;
+    let RatifierPayload::Ecrecover(rd) = &decoded.ratifier_data else {
+        panic!("expected ecrecover ratifier data");
+    };
     assert_eq!(rd.sig, fixture_sig());
     assert_eq!(rd.root, word32(0x33));
     assert_eq!(rd.leaf_index, 2);

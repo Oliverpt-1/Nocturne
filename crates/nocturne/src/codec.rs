@@ -209,6 +209,17 @@ pub fn encode_ratifier_data(sig: &Sig, root: &Word, leaf_index: usize, proof: &[
     ])
 }
 
+/// `abi.encode(bytes32 root, uint256 leafIndex, bytes32[] proof)` - the `ratifierData`
+/// consumed by `SetterRatifier.isRatified`. Carries no signature: the maker ratifies the root
+/// on-chain via `setIsRootRatified` instead.
+pub fn encode_setter_ratifier_data(root: &Word, leaf_index: usize, proof: &[Word]) -> Vec<u8> {
+    encode_sequence(&[
+        Value::Word(*root),
+        Value::Word(usize_word(leaf_index)),
+        Value::Array(proof.iter().map(|w| Value::Word(*w)).collect()),
+    ])
+}
+
 /// `Midnight.take.selector ++ abi.encode(offer, ratifierData, units, taker,
 /// receiverIfTakerIsSeller, takerCallback, takerCallbackData)`.
 #[allow(clippy::too_many_arguments)]

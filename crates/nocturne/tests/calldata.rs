@@ -104,9 +104,80 @@ fn take_calldata_round_trips() {
     assert_eq!(decoded.taker_callback, taker_callback);
     assert_eq!(decoded.taker_callback_data, taker_callback_data);
     assert_eq!(decoded.ratifier_data_raw, ratifier_data);
-    assert_eq!(decoded.ratifier_data.sig, sig);
-    assert_eq!(decoded.ratifier_data.root, tree.root());
-    assert_eq!(decoded.ratifier_data.proof, proof);
+    let RatifierPayload::Ecrecover(rd) = &decoded.ratifier_data else {
+        panic!(
+            "expected ecrecover ratifier data, got {:?}",
+            decoded.ratifier_data
+        );
+    };
+    assert_eq!(rd.sig, sig);
+    assert_eq!(rd.root, tree.root());
+    assert_eq!(rd.proof, proof);
+}
+
+#[test]
+fn setter_ratifier_data_round_trips() {
+    let root = keccak(b"root");
+    let proof = vec![keccak(b"a"), keccak(b"b"), keccak(b"c")];
+    let encoded = encode_setter_ratifier_data(&root, 5, &proof);
+    let decoded = decode_setter_ratifier_data(&encoded).unwrap();
+    assert_eq!(decoded.root, root);
+    assert_eq!(decoded.leaf_index, 5);
+    assert_eq!(decoded.proof, proof);
+}
+
+#[test]
+fn any_ratifier_data_discriminates_both_layouts() {
+    let signer = LocalSigner::from_bytes(&[0x7c; 32]).unwrap();
+    let root = keccak(b"root");
+    let proof = vec![keccak(b"a")];
+    let sig = signer.sign_digest(&keccak(b"digest")).unwrap();
+
+    // EcrecoverRatifier layout: first word is a zero-padded uint8 v.
+    let ec = encode_ratifier_data(&sig, &root, 1, &proof);
+    match decode_any_ratifier_data(&ec).unwrap() {
+        RatifierPayload::Ecrecover(rd) => {
+            assert_eq!(rd.sig, sig);
+            assert_eq!(rd.root, root);
+        }
+        other => panic!("expected ecrecover, got {other:?}"),
+    }
+
+    // SetterRatifier layout: first word is the root itself (a keccak hash).
+    let setter = encode_setter_ratifier_data(&root, 1, &proof);
+    match decode_any_ratifier_data(&setter).unwrap() {
+        RatifierPayload::Setter(rd) => {
+            assert_eq!(rd.root, root);
+            assert_eq!(rd.leaf_index, 1);
+            assert_eq!(rd.proof, proof);
+        }
+        other => panic!("expected setter, got {other:?}"),
+    }
+}
+
+#[test]
+fn take_with_setter_ratifier_data_decodes() {
+    let offer = offer_for([0x42; 20]);
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    let ratifier_data = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0));
+    let calldata = encode_take_calldata(
+        &offer,
+        &ratifier_data,
+        U256::from(1u64),
+        &[0x77; 20],
+        &[0x88; 20],
+        &[0u8; 20],
+        &[],
+    );
+    let d = decode_take_calldata(&calldata).unwrap();
+    let rd = &d.ratifier_data;
+    assert_eq!(rd.sig(), None, "setter data carries no signature");
+    assert!(verify_leaf(
+        rd.root(),
+        &hash_offer(&d.offer),
+        rd.leaf_index(),
+        rd.proof()
+    ));
 }
 
 /// The whole point of the tool: from decoded calldata alone, reproduce the signed root and
@@ -139,7 +210,9 @@ fn decoded_calldata_verifies_signature_and_root() {
     );
 
     let d = decode_take_calldata(&calldata).unwrap();
-    let rd = &d.ratifier_data;
+    let RatifierPayload::Ecrecover(rd) = &d.ratifier_data else {
+        panic!("expected ecrecover ratifier data");
+    };
 
     // 1. The leaf hashes to a member of the signed root.
     let leaf = hash_offer(&d.offer);

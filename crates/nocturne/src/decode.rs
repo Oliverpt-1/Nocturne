@@ -437,20 +437,107 @@ pub fn decode_ratifier_data(bytes: &[u8]) -> Result<RatifierData, DecodeError> {
     })
 }
 
+/// The `SetterRatifier` ratifier data, decoded - the inverse of
+/// [`encode_setter_ratifier_data`](crate::encode_setter_ratifier_data).
+///
+/// Carries **no signature**: the maker authorizes the whole tree on-chain via
+/// `SetterRatifier.setIsRootRatified(maker, root, true)`, and `isRatified` requires
+/// `isRootRatified[offer.maker][root]` - contract state that cannot be checked offline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetterRatifierData {
+    /// The on-chain-ratified Merkle root.
+    pub root: Word,
+    /// The offer's leaf index in the tree.
+    pub leaf_index: usize,
+    /// The Merkle proof from the leaf to `root`; its length is the tree height.
+    pub proof: Vec<Word>,
+}
+
+/// Decode `abi.encode(bytes32 root, uint256 leafIndex, bytes32[] proof)` - the `ratifierData`
+/// consumed by `SetterRatifier.isRatified`.
+pub fn decode_setter_ratifier_data(bytes: &[u8]) -> Result<SetterRatifierData, DecodeError> {
+    let root = word_at(bytes, 0)?;
+    let leaf_index = word_to_usize(&word_at(bytes, 32)?)?;
+    let proof_off = word_to_usize(&word_at(bytes, 64)?)?;
+    let proof = decode_word_array(bytes, proof_off)?;
+    Ok(SetterRatifierData {
+        root,
+        leaf_index,
+        proof,
+    })
+}
+
+/// Ratifier data in either known on-chain layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RatifierPayload {
+    /// `EcrecoverRatifier`: a maker signature over the tree digest travels with the take.
+    Ecrecover(RatifierData),
+    /// `SetterRatifier`: no signature; the maker must have ratified the root on-chain.
+    Setter(SetterRatifierData),
+}
+
+impl RatifierPayload {
+    /// The Merkle root the offer must sit under.
+    pub fn root(&self) -> &Word {
+        match self {
+            Self::Ecrecover(rd) => &rd.root,
+            Self::Setter(rd) => &rd.root,
+        }
+    }
+
+    /// The offer's leaf index in the tree.
+    pub fn leaf_index(&self) -> usize {
+        match self {
+            Self::Ecrecover(rd) => rd.leaf_index,
+            Self::Setter(rd) => rd.leaf_index,
+        }
+    }
+
+    /// The Merkle proof; its length is the tree height.
+    pub fn proof(&self) -> &[Word] {
+        match self {
+            Self::Ecrecover(rd) => &rd.proof,
+            Self::Setter(rd) => &rd.proof,
+        }
+    }
+
+    /// The embedded maker signature, if this layout carries one.
+    pub fn sig(&self) -> Option<&Sig> {
+        match self {
+            Self::Ecrecover(rd) => Some(&rd.sig),
+            Self::Setter(_) => None,
+        }
+    }
+}
+
+/// Decode ratifier data in whichever known layout it uses.
+///
+/// The layouts are distinguishable by the first word: `EcrecoverRatifier` data starts with a
+/// zero-padded `uint8 v`, `SetterRatifier` data with a 32-byte Merkle root (a keccak hash,
+/// never fitting in one byte), so the wrong layout is never silently accepted.
+pub fn decode_any_ratifier_data(bytes: &[u8]) -> Result<RatifierPayload, DecodeError> {
+    let first = word_at(bytes, 0)?;
+    if first[..31].iter().all(|&b| b == 0) {
+        decode_ratifier_data(bytes).map(RatifierPayload::Ecrecover)
+    } else {
+        decode_setter_ratifier_data(bytes).map(RatifierPayload::Setter)
+    }
+}
+
 /// A decoded `Midnight.take` call - the inverse of
 /// [`encode_take_calldata`](crate::encode_take_calldata).
 ///
 /// Everything a taker's transaction carries, split back into typed fields. `ratifier_data` is
-/// the already-decoded [`RatifierData`]; `ratifier_data_raw` keeps the original bytes so callers
-/// can re-verify the exact blob that was signed over / submitted.
+/// the already-decoded [`RatifierPayload`]; `ratifier_data_raw` keeps the original bytes so
+/// callers can re-verify the exact blob that was signed over / submitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TakeCall {
     /// The offer being taken.
     pub offer: Offer,
     /// The raw `ratifierData` bytes as they appear in the calldata.
     pub ratifier_data_raw: Vec<u8>,
-    /// The decoded `ratifierData` (signature, root, leaf index, proof).
-    pub ratifier_data: RatifierData,
+    /// The decoded `ratifierData`, in either known ratifier layout.
+    pub ratifier_data: RatifierPayload,
     /// Units the taker is consuming.
     pub units: U256,
     /// The taker address.
@@ -481,7 +568,7 @@ pub fn decode_take_calldata(bytes: &[u8]) -> Result<TakeCall, DecodeError> {
 
     let offer = decode_offer_tuple(args, offer_off)?;
     let ratifier_data_raw = decode_bytes(args, ratifier_off)?;
-    let ratifier_data = decode_ratifier_data(&ratifier_data_raw)?;
+    let ratifier_data = decode_any_ratifier_data(&ratifier_data_raw)?;
     let taker_callback_data = decode_bytes(args, callback_data_off)?;
 
     Ok(TakeCall {
@@ -610,8 +697,8 @@ pub struct OfferFill {
     pub offer: Offer,
     /// The raw `ratifierData` bytes as they appear in the calldata.
     pub ratifier_data_raw: Vec<u8>,
-    /// The decoded `ratifierData` (signature, root, leaf index, proof).
-    pub ratifier_data: RatifierData,
+    /// The decoded `ratifierData`, in either known ratifier layout.
+    pub ratifier_data: RatifierPayload,
     /// Units this fill consumes from the offer.
     pub units: U256,
 }
@@ -804,7 +891,7 @@ fn decode_offer_fills(bytes: &[u8], base: usize) -> Result<Vec<OfferFill>, Decod
         let units = word_to_u256(&head_word(bytes, fill_base, 2)?);
         let offer = decode_offer_tuple(bytes, resolve(fill_base, offer_off)?)?;
         let ratifier_data_raw = decode_bytes(bytes, resolve(fill_base, rd_off)?)?;
-        let ratifier_data = decode_ratifier_data(&ratifier_data_raw)?;
+        let ratifier_data = decode_any_ratifier_data(&ratifier_data_raw)?;
         out.push(OfferFill {
             offer,
             ratifier_data_raw,

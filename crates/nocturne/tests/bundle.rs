@@ -63,7 +63,7 @@ fn signed_fills() -> (Vec<OfferFill>, Address) {
             let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i));
             OfferFill {
                 offer: offer.clone(),
-                ratifier_data: decode_ratifier_data(&raw).unwrap(),
+                ratifier_data: decode_any_ratifier_data(&raw).unwrap(),
                 ratifier_data_raw: raw,
                 units: U256::from(100_000u64 * (i as u64 + 1)),
             }
@@ -153,17 +153,17 @@ fn decoded_fills_verify_like_bare_takes() {
     for fill in &decoded.fills {
         let rd = &fill.ratifier_data;
         assert!(verify_leaf(
-            &rd.root,
+            rd.root(),
             &hash_offer(&fill.offer),
-            rd.leaf_index,
-            &rd.proof
+            rd.leaf_index(),
+            rd.proof()
         ));
         assert!(verify(
             &fill.offer,
-            &rd.root,
-            rd.leaf_index,
-            &rd.proof,
-            &rd.sig,
+            rd.root(),
+            rd.leaf_index(),
+            rd.proof(),
+            rd.sig().expect("ecrecover fill carries a signature"),
             word_from_u64(31337),
             &fill.offer.ratifier,
             &maker,
