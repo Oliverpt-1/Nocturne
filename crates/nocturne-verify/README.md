@@ -73,6 +73,23 @@ nocturne-verify digest offer1.json offer2.json --expect-root 0xRootFromWallet
 Without `--offers` the payload is decoded and reported PARTIAL — a bare root cannot be verified
 by itself. Offer order matters: it sets the leaf indices.
 
+### `verify-typed` — check the typed data a wallet asks a maker to sign
+
+With the app's "Allow off-chain signing" toggle on, a maker signs an `eth_signTypedData_v4`
+document over the entire offer tree. Save that JSON and verify it before signing:
+
+```sh
+nocturne-verify verify-typed payload.json
+# additionally assert the leaves are exactly your intended offers:
+nocturne-verify verify-typed payload.json --offers offer1.json offer2.json ...
+```
+
+Every offer is decoded to readable terms (zero-offer padding leaves are summarized — they can
+never be taken), and the load-bearing check regenerates the canonical document from the parsed
+offers and requires it to equal the input: that proves there are no hidden fields and no
+tampered `types` table, so the DIGEST printed is exactly what the wallet will hash. A tampered
+*value* still reads as canonical — that is what your own eyes, or `--offers`, are for.
+
 ### `decode` — read any payload in plain terms
 
 ```sh
