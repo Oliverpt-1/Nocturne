@@ -14,6 +14,19 @@ pub const TAKE_SELECTOR: [u8; 4] = [0x6a, 0x14, 0xc9, 0xef];
 /// `EcrecoverRatifier.cancelRoot(address,bytes32)` selector.
 pub const CANCEL_ROOT_SELECTOR: [u8; 4] = [0xbb, 0x1f, 0x12, 0xaa];
 
+// `IMidnightBundlesV1` fill-function selectors, derived with `cast sig` from the vendored
+// interface (morpho-apps `IMidnightBundles.sol`); the BuyWithAssetsTarget selector is also
+// cross-checked against production calldata and the openchain signature database.
+
+/// `midnightBundlesV1BuyWithUnitsTargetAndWithdrawCollateral(...)` selector.
+pub const BUNDLE_BUY_UNITS_SELECTOR: [u8; 4] = [0xff, 0xb4, 0x58, 0x4e];
+/// `midnightBundlesV1SupplyCollateralAndSellWithUnitsTarget(...)` selector.
+pub const BUNDLE_SELL_UNITS_SELECTOR: [u8; 4] = [0xb7, 0x07, 0xc6, 0x08];
+/// `midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral(...)` selector.
+pub const BUNDLE_BUY_ASSETS_SELECTOR: [u8; 4] = [0xa8, 0x5d, 0x52, 0xe5];
+/// `midnightBundlesV1SupplyCollateralAndSellWithAssetsTarget(...)` selector.
+pub const BUNDLE_SELL_ASSETS_SELECTOR: [u8; 4] = [0x2f, 0xbc, 0x23, 0xf8];
+
 // ---- word packing helpers ----
 
 #[inline]
@@ -220,6 +233,96 @@ pub fn encode_take_calldata(
     let mut out = Vec::with_capacity(4 + args.len());
     out.extend_from_slice(&TAKE_SELECTOR);
     out.extend(args);
+    out
+}
+
+/// `IMidnightBundles` fill calldata: the kind's selector ++ its ABI-encoded arguments - the
+/// inverse of [`decode_bundle_calldata`](crate::decode_bundle_calldata).
+///
+/// The wrapper argument order per kind mirrors `IMidnightBundlesV1`: buy variants carry a
+/// `TokenPermit`, `OfferFill[]`, `CollateralWithdrawal[]`, and a collateral receiver; sell
+/// variants a receiver, `CollateralSupply[]`, then `OfferFill[]`. Both end with
+/// (referralFeePct, referralFeeRecipient, maxContinuousFee, deadline).
+pub fn encode_bundle_calldata(b: &crate::BundleCall) -> Vec<u8> {
+    let fills = Value::Array(
+        b.fills
+            .iter()
+            .map(|f| {
+                Value::Tuple(vec![
+                    offer_value(&f.offer),
+                    Value::Bytes(f.ratifier_data_raw.clone()),
+                    Value::Word(f.units.to_be_bytes::<32>()),
+                ])
+            })
+            .collect(),
+    );
+    let tail = [
+        Value::Word(b.referral_fee_pct.to_be_bytes::<32>()),
+        Value::Word(addr_word(&b.referral_fee_recipient)),
+        Value::Word(b.max_continuous_fee.to_be_bytes::<32>()),
+        Value::Word(b.deadline.to_be_bytes::<32>()),
+    ];
+    let common = [
+        Value::Word(b.target.to_be_bytes::<32>()),
+        Value::Word(b.limit.to_be_bytes::<32>()),
+        Value::Word(addr_word(&b.taker)),
+        Value::Word(bool_word(b.reduce_only)),
+    ];
+    let permit_value = |p: &crate::TokenPermit| {
+        Value::Tuple(vec![
+            Value::Word(usize_word(p.kind as usize)),
+            Value::Bytes(p.data.clone()),
+        ])
+    };
+
+    let mut args: Vec<Value> = common.into();
+    match &b.side {
+        crate::BundleSide::Buy {
+            loan_token_permit,
+            collateral_withdrawals,
+            collateral_receiver,
+        } => {
+            args.push(permit_value(loan_token_permit));
+            args.push(fills);
+            args.push(Value::Array(
+                collateral_withdrawals
+                    .iter()
+                    .map(|w| {
+                        Value::Tuple(vec![
+                            Value::Word(w.collateral_index.to_be_bytes::<32>()),
+                            Value::Word(w.assets.to_be_bytes::<32>()),
+                        ])
+                    })
+                    .collect(),
+            ));
+            args.push(Value::Word(addr_word(collateral_receiver)));
+        }
+        crate::BundleSide::Sell {
+            receiver,
+            collateral_supplies,
+        } => {
+            args.push(Value::Word(addr_word(receiver)));
+            args.push(Value::Array(
+                collateral_supplies
+                    .iter()
+                    .map(|s| {
+                        Value::Tuple(vec![
+                            Value::Word(s.collateral_index.to_be_bytes::<32>()),
+                            Value::Word(s.assets.to_be_bytes::<32>()),
+                            permit_value(&s.permit),
+                        ])
+                    })
+                    .collect(),
+            ));
+            args.push(fills);
+        }
+    }
+    args.extend(tail);
+
+    let encoded = encode_sequence(&args);
+    let mut out = Vec::with_capacity(4 + encoded.len());
+    out.extend_from_slice(&b.kind.selector());
+    out.extend(encoded);
     out
 }
 

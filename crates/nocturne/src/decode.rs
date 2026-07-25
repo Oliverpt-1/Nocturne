@@ -496,6 +496,343 @@ pub fn decode_take_calldata(bytes: &[u8]) -> Result<TakeCall, DecodeError> {
     })
 }
 
+// ---- bundle calldata decoding --------------------------------------------------
+
+/// Which `IMidnightBundles` fill function a bundle payload calls.
+///
+/// These are the app-router wrappers around one or more `Midnight.take`s. The wrapper arguments
+/// are taker-side execution bounds and are NOT covered by any maker signature; each embedded
+/// [`OfferFill`] carries its own offer + ratifier data and verifies exactly like a bare take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BundleKind {
+    /// `midnightBundlesV1BuyWithUnitsTargetAndWithdrawCollateral`.
+    BuyWithUnitsTarget,
+    /// `midnightBundlesV1SupplyCollateralAndSellWithUnitsTarget`.
+    SellWithUnitsTarget,
+    /// `midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral`.
+    BuyWithAssetsTarget,
+    /// `midnightBundlesV1SupplyCollateralAndSellWithAssetsTarget`.
+    SellWithAssetsTarget,
+}
+
+impl BundleKind {
+    /// Map a 4-byte selector to its bundle kind, if it is one of the four fill functions.
+    pub fn from_selector(sel: [u8; 4]) -> Option<Self> {
+        match sel {
+            crate::BUNDLE_BUY_UNITS_SELECTOR => Some(Self::BuyWithUnitsTarget),
+            crate::BUNDLE_SELL_UNITS_SELECTOR => Some(Self::SellWithUnitsTarget),
+            crate::BUNDLE_BUY_ASSETS_SELECTOR => Some(Self::BuyWithAssetsTarget),
+            crate::BUNDLE_SELL_ASSETS_SELECTOR => Some(Self::SellWithAssetsTarget),
+            _ => None,
+        }
+    }
+
+    /// This kind's 4-byte selector.
+    pub fn selector(&self) -> [u8; 4] {
+        match self {
+            Self::BuyWithUnitsTarget => crate::BUNDLE_BUY_UNITS_SELECTOR,
+            Self::SellWithUnitsTarget => crate::BUNDLE_SELL_UNITS_SELECTOR,
+            Self::BuyWithAssetsTarget => crate::BUNDLE_BUY_ASSETS_SELECTOR,
+            Self::SellWithAssetsTarget => crate::BUNDLE_SELL_ASSETS_SELECTOR,
+        }
+    }
+
+    /// The Solidity function name behind this kind's selector.
+    pub fn function_name(&self) -> &'static str {
+        match self {
+            Self::BuyWithUnitsTarget => "midnightBundlesV1BuyWithUnitsTargetAndWithdrawCollateral",
+            Self::SellWithUnitsTarget => "midnightBundlesV1SupplyCollateralAndSellWithUnitsTarget",
+            Self::BuyWithAssetsTarget => {
+                "midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral"
+            }
+            Self::SellWithAssetsTarget => {
+                "midnightBundlesV1SupplyCollateralAndSellWithAssetsTarget"
+            }
+        }
+    }
+
+    /// Human label for the wrapper's first argument (the fill target).
+    pub fn target_label(&self) -> &'static str {
+        match self {
+            Self::BuyWithUnitsTarget | Self::SellWithUnitsTarget => "target units",
+            Self::BuyWithAssetsTarget => "target buyer assets",
+            Self::SellWithAssetsTarget => "target seller assets",
+        }
+    }
+
+    /// Human label for the wrapper's second argument (the bound on the other quantity).
+    pub fn limit_label(&self) -> &'static str {
+        match self {
+            Self::BuyWithUnitsTarget => "max buyer assets",
+            Self::SellWithUnitsTarget => "min seller assets",
+            Self::BuyWithAssetsTarget => "min units",
+            Self::SellWithAssetsTarget => "max units",
+        }
+    }
+}
+
+/// `TokenPermit { PermitKind kind; bytes data; }` - kind 0 is `None`, 1 `ERC2612`, 2 `Permit2`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenPermit {
+    /// The `PermitKind` enum value.
+    pub kind: u8,
+    /// The opaque permit payload.
+    pub data: Vec<u8>,
+}
+
+/// `CollateralWithdrawal { uint256 collateralIndex; uint256 assets; }`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollateralWithdrawal {
+    /// Index into the market's `collateralParams`.
+    pub collateral_index: U256,
+    /// Collateral assets to withdraw.
+    pub assets: U256,
+}
+
+/// `CollateralSupply { uint256 collateralIndex; uint256 assets; TokenPermit permit; }`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollateralSupply {
+    /// Index into the market's `collateralParams`.
+    pub collateral_index: U256,
+    /// Collateral assets to supply.
+    pub assets: U256,
+    /// Optional permit authorizing the supply transfer.
+    pub permit: TokenPermit,
+}
+
+/// One `OfferFill { Offer offer; bytes ratifierData; uint256 units; }` element of a bundle.
+///
+/// This is the signed part: `offer` + `ratifier_data` verify exactly like a bare
+/// [`TakeCall`]'s, independent of the wrapper around them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferFill {
+    /// The offer being taken.
+    pub offer: Offer,
+    /// The raw `ratifierData` bytes as they appear in the calldata.
+    pub ratifier_data_raw: Vec<u8>,
+    /// The decoded `ratifierData` (signature, root, leaf index, proof).
+    pub ratifier_data: RatifierData,
+    /// Units this fill consumes from the offer.
+    pub units: U256,
+}
+
+/// The kind-specific wrapper arguments of a bundle call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BundleSide {
+    /// Buy variants: permit for the loan token, collateral withdrawals after the fills.
+    Buy {
+        /// Permit authorizing the taker's loan-token transfer.
+        loan_token_permit: TokenPermit,
+        /// Collateral withdrawals executed after the fills.
+        collateral_withdrawals: Vec<CollateralWithdrawal>,
+        /// Receiver of the withdrawn collateral.
+        collateral_receiver: Address,
+    },
+    /// Sell variants: collateral supplies before the fills, receiver of the seller assets.
+    Sell {
+        /// Receiver of the seller's loan-token proceeds.
+        receiver: Address,
+        /// Collateral supplies executed before the fills.
+        collateral_supplies: Vec<CollateralSupply>,
+    },
+}
+
+/// A decoded `IMidnightBundles` fill call - the inverse of
+/// [`encode_bundle_calldata`](crate::encode_bundle_calldata).
+///
+/// The meaning of `target` / `limit` depends on [`kind`](Self::kind); see
+/// [`BundleKind::target_label`] / [`BundleKind::limit_label`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleCall {
+    /// Which fill function the selector names.
+    pub kind: BundleKind,
+    /// The fill target (units or assets, per kind).
+    pub target: U256,
+    /// The bound on the other quantity (per kind).
+    pub limit: U256,
+    /// The taker address.
+    pub taker: Address,
+    /// Whether the fills may only reduce the taker's position.
+    pub reduce_only: bool,
+    /// Kind-specific wrapper arguments.
+    pub side: BundleSide,
+    /// The embedded takes, in fill order.
+    pub fills: Vec<OfferFill>,
+    /// Referral fee percentage (WAD-scaled).
+    pub referral_fee_pct: U256,
+    /// Referral fee recipient.
+    pub referral_fee_recipient: Address,
+    /// Cap on the continuous fee of the touched market.
+    pub max_continuous_fee: U256,
+    /// Unix deadline for the bundle execution.
+    pub deadline: U256,
+}
+
+/// Decode raw `IMidnightBundles` fill calldata (any of the four fill selectors) into a
+/// [`BundleCall`] - the inverse of [`encode_bundle_calldata`](crate::encode_bundle_calldata).
+///
+/// Errors [`DecodeError::BadSelector`] for other selectors. Trailing bytes after the ABI
+/// region (referral/metadata tags appended by apps) are tolerated, but a payload whose
+/// offsets point past its end (a truncated copy) errors [`DecodeError::TooShort`].
+pub fn decode_bundle_calldata(bytes: &[u8]) -> Result<BundleCall, DecodeError> {
+    if bytes.len() < 4 {
+        return Err(DecodeError::TooShort {
+            needed: 4,
+            have: bytes.len(),
+        });
+    }
+    let sel = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    let kind = BundleKind::from_selector(sel).ok_or(DecodeError::BadSelector(sel))?;
+    let args = &bytes[4..];
+
+    // Shared prefix: target, limit, taker, reduceOnly.
+    let target = word_to_u256(&head_word(args, 0, 0)?);
+    let limit = word_to_u256(&head_word(args, 0, 1)?);
+    let taker = word_to_address(&head_word(args, 0, 2)?);
+    let reduce_only = word_to_bool(&head_word(args, 0, 3)?)?;
+
+    // Kind-specific middle: buy variants are (permit, fills, withdrawals, collateralReceiver);
+    // sell variants are (receiver, supplies, fills). Both end with
+    // (referralFeePct, referralFeeRecipient, maxContinuousFee, deadline).
+    let (side, fills, tail_slot) = match kind {
+        BundleKind::BuyWithUnitsTarget | BundleKind::BuyWithAssetsTarget => {
+            let permit_off = word_to_usize(&head_word(args, 0, 4)?)?;
+            let fills_off = word_to_usize(&head_word(args, 0, 5)?)?;
+            let withdrawals_off = word_to_usize(&head_word(args, 0, 6)?)?;
+            let collateral_receiver = word_to_address(&head_word(args, 0, 7)?);
+            let side = BundleSide::Buy {
+                loan_token_permit: decode_token_permit(args, permit_off)?,
+                collateral_withdrawals: decode_collateral_withdrawals(args, withdrawals_off)?,
+                collateral_receiver,
+            };
+            (side, decode_offer_fills(args, fills_off)?, 8)
+        }
+        BundleKind::SellWithUnitsTarget | BundleKind::SellWithAssetsTarget => {
+            let receiver = word_to_address(&head_word(args, 0, 4)?);
+            let supplies_off = word_to_usize(&head_word(args, 0, 5)?)?;
+            let fills_off = word_to_usize(&head_word(args, 0, 6)?)?;
+            let side = BundleSide::Sell {
+                receiver,
+                collateral_supplies: decode_collateral_supplies(args, supplies_off)?,
+            };
+            (side, decode_offer_fills(args, fills_off)?, 7)
+        }
+    };
+
+    Ok(BundleCall {
+        kind,
+        target,
+        limit,
+        taker,
+        reduce_only,
+        side,
+        fills,
+        referral_fee_pct: word_to_u256(&head_word(args, 0, tail_slot)?),
+        referral_fee_recipient: word_to_address(&head_word(args, 0, tail_slot + 1)?),
+        max_continuous_fee: word_to_u256(&head_word(args, 0, tail_slot + 2)?),
+        deadline: word_to_u256(&head_word(args, 0, tail_slot + 3)?),
+    })
+}
+
+/// Decode a `TokenPermit` tuple whose head begins at absolute offset `base`.
+fn decode_token_permit(bytes: &[u8], base: usize) -> Result<TokenPermit, DecodeError> {
+    let kind = word_to_small(&head_word(bytes, base, 0)?, 1)? as u8;
+    let data_off = word_to_usize(&head_word(bytes, base, 1)?)?;
+    let data = decode_bytes(bytes, resolve(base, data_off)?)?;
+    Ok(TokenPermit { kind, data })
+}
+
+/// Decode a `CollateralWithdrawal[]` (static 2-word tuples, laid out inline) whose length
+/// word is at absolute offset `base`.
+fn decode_collateral_withdrawals(
+    bytes: &[u8],
+    base: usize,
+) -> Result<Vec<CollateralWithdrawal>, DecodeError> {
+    let len = word_to_usize(&word_at(bytes, base)?)?;
+    let elems_base = resolve(base, 32)?;
+    let span = len.checked_mul(64).ok_or(DecodeError::BadLength(len))?;
+    let end = elems_base
+        .checked_add(span)
+        .ok_or(DecodeError::BadLength(len))?;
+    if end > bytes.len() {
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
+    }
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let e_base = resolve(elems_base, i * 64)?;
+        out.push(CollateralWithdrawal {
+            collateral_index: word_to_u256(&head_word(bytes, e_base, 0)?),
+            assets: word_to_u256(&head_word(bytes, e_base, 1)?),
+        });
+    }
+    Ok(out)
+}
+
+/// Decode a `CollateralSupply[]` (dynamic tuples: per-element offsets relative to the array
+/// data area) whose length word is at absolute offset `base`.
+fn decode_collateral_supplies(
+    bytes: &[u8],
+    base: usize,
+) -> Result<Vec<CollateralSupply>, DecodeError> {
+    let (len, elems_base) = dynamic_array_head(bytes, base)?;
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let off = word_to_usize(&head_word(bytes, elems_base, i)?)?;
+        let e_base = resolve(elems_base, off)?;
+        let permit_off = word_to_usize(&head_word(bytes, e_base, 2)?)?;
+        out.push(CollateralSupply {
+            collateral_index: word_to_u256(&head_word(bytes, e_base, 0)?),
+            assets: word_to_u256(&head_word(bytes, e_base, 1)?),
+            permit: decode_token_permit(bytes, resolve(e_base, permit_off)?)?,
+        });
+    }
+    Ok(out)
+}
+
+/// Decode an `OfferFill[]` (dynamic tuples) whose length word is at absolute offset `base`.
+fn decode_offer_fills(bytes: &[u8], base: usize) -> Result<Vec<OfferFill>, DecodeError> {
+    let (len, elems_base) = dynamic_array_head(bytes, base)?;
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let off = word_to_usize(&head_word(bytes, elems_base, i)?)?;
+        let fill_base = resolve(elems_base, off)?;
+        let offer_off = word_to_usize(&head_word(bytes, fill_base, 0)?)?;
+        let rd_off = word_to_usize(&head_word(bytes, fill_base, 1)?)?;
+        let units = word_to_u256(&head_word(bytes, fill_base, 2)?);
+        let offer = decode_offer_tuple(bytes, resolve(fill_base, offer_off)?)?;
+        let ratifier_data_raw = decode_bytes(bytes, resolve(fill_base, rd_off)?)?;
+        let ratifier_data = decode_ratifier_data(&ratifier_data_raw)?;
+        out.push(OfferFill {
+            offer,
+            ratifier_data_raw,
+            ratifier_data,
+            units,
+        });
+    }
+    Ok(out)
+}
+
+/// Read a dynamic-tuple array's length word at `base` and bounds-check its offset table
+/// (one word per element) before any allocation; returns `(len, elems_base)`.
+fn dynamic_array_head(bytes: &[u8], base: usize) -> Result<(usize, usize), DecodeError> {
+    let len = word_to_usize(&word_at(bytes, base)?)?;
+    let elems_base = resolve(base, 32)?;
+    let span = len.checked_mul(32).ok_or(DecodeError::BadLength(len))?;
+    let end = elems_base
+        .checked_add(span)
+        .ok_or(DecodeError::BadLength(len))?;
+    if end > bytes.len() {
+        return Err(DecodeError::TooShort {
+            needed: end,
+            have: bytes.len(),
+        });
+    }
+    Ok((len, elems_base))
+}
+
 /// Decode raw `EcrecoverRatifier.cancelRoot(address maker, bytes32 root)` calldata - the inverse
 /// of [`encode_cancel_root_calldata`](crate::encode_cancel_root_calldata).
 pub fn decode_cancel_root_calldata(bytes: &[u8]) -> Result<(Address, Word), DecodeError> {
