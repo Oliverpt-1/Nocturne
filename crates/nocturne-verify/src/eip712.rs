@@ -114,6 +114,258 @@ pub fn typed_data(offers: &[Offer], chain_id: Word, ratifier: &Address, height: 
     })
 }
 
+// ---- parsing (the inverse of `typed_data`, for verifying wallet prompts) --------
+//
+// Declarative serde mirror of the message shape, strict on every level: unknown fields,
+// missing fields, non-pair nesting, and out-of-range values are all errors. A field this
+// parser ignored could still change what the wallet hashes, so nothing is ignored.
+
+use serde::Deserialize;
+
+/// A typed-data document parsed back into library types.
+pub struct ParsedTypedData {
+    /// The tree's leaves in order (including any zero-offer padding).
+    pub offers: Vec<Offer>,
+    /// The domain chain id.
+    pub chain_id: Word,
+    /// The domain verifying contract (the ratifier).
+    pub ratifier: Address,
+    /// The tree height (nesting depth of `offerTree`).
+    pub height: usize,
+}
+
+/// A uint256 as typed data carries it: a decimal string.
+struct Uint(Word);
+
+impl<'de> Deserialize<'de> for Uint {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        let u = U256::from_str_radix(s.trim(), 10).map_err(serde::de::Error::custom)?;
+        Ok(Uint(u256_to_word(u)))
+    }
+}
+
+/// A `0x`-prefixed fixed- or variable-length hex string.
+struct Hex<const N: usize>([u8; N]);
+
+impl<'de, const N: usize> Deserialize<'de> for Hex<N> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        let b = hex::decode(s.trim().trim_start_matches("0x")).map_err(serde::de::Error::custom)?;
+        b.try_into().map(Hex).map_err(|b: Vec<u8>| {
+            serde::de::Error::custom(format!("expected {N} bytes, got {}", b.len()))
+        })
+    }
+}
+
+struct HexBytes(Vec<u8>);
+
+impl<'de> Deserialize<'de> for HexBytes {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        hex::decode(s.trim().trim_start_matches("0x"))
+            .map(HexBytes)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// A uint128 as typed data carries it: a decimal string that must fit 128 bits.
+struct Uint128(u128);
+
+impl<'de> Deserialize<'de> for Uint128 {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        s.trim()
+            .parse()
+            .map(Uint128)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CpMsg {
+    token: Hex<20>,
+    lltv: Uint,
+    liquidation_cursor: Uint,
+    oracle: Hex<20>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct MarketMsg {
+    chain_id: Uint,
+    midnight: Hex<20>,
+    loan_token: Hex<20>,
+    collateral_params: Vec<CpMsg>,
+    maturity: Uint,
+    rcf_threshold: Uint,
+    enter_gate: Hex<20>,
+    liquidator_gate: Hex<20>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OfferMsg {
+    market: MarketMsg,
+    buy: bool,
+    maker: Hex<20>,
+    start: Uint,
+    expiry: Uint,
+    tick: Uint,
+    group: Hex<32>,
+    callback: Hex<20>,
+    callback_data: HexBytes,
+    receiver_if_maker_is_seller: Hex<20>,
+    ratifier: Hex<20>,
+    reduce_only: bool,
+    max_units: Uint128,
+    max_assets: Uint128,
+    continuous_fee_cap: Uint,
+}
+
+impl From<OfferMsg> for Offer {
+    fn from(o: OfferMsg) -> Self {
+        Offer {
+            market: Market {
+                chain_id: o.market.chain_id.0,
+                midnight: o.market.midnight.0,
+                loan_token: o.market.loan_token.0,
+                collateral_params: o
+                    .market
+                    .collateral_params
+                    .into_iter()
+                    .map(|cp| CollateralParams {
+                        token: cp.token.0,
+                        lltv: cp.lltv.0,
+                        liquidation_cursor: cp.liquidation_cursor.0,
+                        oracle: cp.oracle.0,
+                    })
+                    .collect(),
+                maturity: o.market.maturity.0,
+                rcf_threshold: o.market.rcf_threshold.0,
+                enter_gate: o.market.enter_gate.0,
+                liquidator_gate: o.market.liquidator_gate.0,
+            },
+            buy: o.buy,
+            maker: o.maker.0,
+            start: o.start.0,
+            expiry: o.expiry.0,
+            tick: o.tick.0,
+            group: o.group.0,
+            callback: o.callback.0,
+            callback_data: o.callback_data.0,
+            receiver_if_maker_is_seller: o.receiver_if_maker_is_seller.0,
+            ratifier: o.ratifier.0,
+            reduce_only: o.reduce_only,
+            max_units: o.max_units.0,
+            max_assets: o.max_assets.0,
+            continuous_fee_cap: o.continuous_fee_cap.0,
+        }
+    }
+}
+
+/// One node of the nested `Offer[2]^h` tree: either a pair or a leaf offer.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum TreeNode {
+    Pair(Box<[TreeNode; 2]>),
+    Leaf(Box<OfferMsg>),
+}
+
+impl TreeNode {
+    /// Flatten depth-first (the order `typed_data`'s fold produces), enforcing uniform depth.
+    fn leaves(self, depth: usize, height: usize, out: &mut Vec<Offer>) -> Result<(), String> {
+        match self {
+            TreeNode::Leaf(o) if depth == height => {
+                out.push((*o).into());
+                Ok(())
+            }
+            TreeNode::Leaf(_) => Err(format!("leaf at depth {depth}, expected {height}")),
+            TreeNode::Pair(_) if depth == height => {
+                Err(format!("nesting deeper than height {height}"))
+            }
+            TreeNode::Pair(pair) => {
+                let [l, r] = *pair;
+                l.leaves(depth + 1, height, out)?;
+                r.leaves(depth + 1, height, out)
+            }
+        }
+    }
+
+    fn depth(&self) -> usize {
+        match self {
+            TreeNode::Leaf(_) => 0,
+            TreeNode::Pair(pair) => 1 + pair[0].depth(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct MessageMsg {
+    offer_tree: TreeNode,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct DomainMsg {
+    chain_id: Uint,
+    verifying_contract: Hex<20>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct TypedDataMsg {
+    primary_type: String,
+    domain: DomainMsg,
+    /// Kept as raw JSON: the types table is checked by canonical regeneration
+    /// ([`docs_equivalent`]), not field-by-field.
+    #[allow(dead_code)]
+    types: Value,
+    message: MessageMsg,
+}
+
+/// Parse a full EIP-712 typed-data document (the shape [`typed_data`] emits, i.e. what an
+/// `eth_signTypedData_v4` wallet displays) back into typed offers and domain values.
+pub fn parse_typed_data(doc: &Value) -> Result<ParsedTypedData, String> {
+    let td: TypedDataMsg = serde_json::from_value(doc.clone()).map_err(|e| e.to_string())?;
+    if td.primary_type != "OfferTree" {
+        return Err(format!(
+            "primaryType: expected \"OfferTree\", got \"{}\"",
+            td.primary_type
+        ));
+    }
+    let height = td.message.offer_tree.depth();
+    let mut offers = Vec::new();
+    td.message
+        .offer_tree
+        .leaves(0, height, &mut offers)
+        .map_err(|e| format!("message.offerTree: {e}"))?;
+    Ok(ParsedTypedData {
+        offers,
+        chain_id: td.domain.chain_id.0,
+        ratifier: td.domain.verifying_contract.0,
+        height,
+    })
+}
+
+/// Compare two typed-data documents up to hex-string case (address checksum casing does not
+/// affect `eth_signTypedData_v4` hashing) and object key order.
+pub fn docs_equivalent(a: &Value, b: &Value) -> bool {
+    fn norm(v: &Value) -> Value {
+        match v {
+            Value::String(s) if s.starts_with("0x") => Value::String(s.to_lowercase()),
+            Value::Array(items) => Value::Array(items.iter().map(norm).collect()),
+            Value::Object(m) => {
+                Value::Object(m.iter().map(|(k, v)| (k.clone(), norm(v))).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    norm(a) == norm(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

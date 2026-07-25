@@ -1122,6 +1122,7 @@ dependencies = [
  "clap",
  "hex",
  "nocturne",
+ "serde",
  "serde_json",
 ]
 

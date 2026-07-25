@@ -69,6 +69,23 @@ enum Command {
         #[arg(long, num_args = 1..)]
         offers: Vec<std::path::PathBuf>,
     },
+    /// Verify an EIP-712 typed-data document (the `eth_signTypedData_v4` JSON a wallet asks a
+    /// maker to sign): decode every offer, prove the document is the canonical encoding of
+    /// those offers, and reproduce the digest. Exits non-zero if any check fails.
+    VerifyTyped {
+        /// Path to the typed-data JSON file.
+        file: std::path::PathBuf,
+        /// Reference Unix time, used to compute APR in the printed terms.
+        #[arg(long)]
+        now: Option<u64>,
+        /// Also assert the leaves equal these intended offer JSON files (in order; remaining
+        /// leaves must be zero-offer padding).
+        #[arg(long, num_args = 1..)]
+        offers: Vec<std::path::PathBuf>,
+        /// Assert the computed digest equals this 32-byte hex value.
+        #[arg(long)]
+        expect: Option<String>,
+    },
     /// Reproduce the Merkle root and EIP-712 digest from the offer terms you *intend* to sign
     /// (JSON files), so you can compare against what a wallet displays.
     Digest {
@@ -122,6 +139,12 @@ fn main() -> ExitCode {
             now,
             offers,
         } => cmd_verify(&payload, chain_id, expected_maker.as_deref(), now, &offers),
+        Command::VerifyTyped {
+            file,
+            now,
+            offers,
+            expect,
+        } => cmd_verify_typed(&file, now, &offers, expect.as_deref()),
         Command::Digest {
             offers,
             chain_id,
@@ -508,6 +531,129 @@ fn verify_offer_checks(
         check(ok, matches, "--chain-id matches the offer's market.chainId");
     }
     Ok(())
+}
+
+/// Verify the EIP-712 typed data a wallet asks a maker to sign (the "off-chain signing" flow):
+/// parse the offers out, prove the document is byte-for-byte the canonical encoding of those
+/// offers (so the wallet's hash equals the digest computed here), and show every term.
+fn cmd_verify_typed(
+    file: &std::path::Path,
+    now: Option<u64>,
+    offer_paths: &[std::path::PathBuf],
+    expect: Option<&str>,
+) -> Result<ExitCode, String> {
+    let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let parsed = eip712::parse_typed_data(&doc)?;
+
+    let zero_offer = |o: &Offer| o.maker == [0u8; 20];
+    let real: Vec<&Offer> = parsed.offers.iter().filter(|o| !zero_offer(o)).collect();
+
+    println!("Verifying EIP-712 typed-data payload (maker off-chain signing)\n");
+    println!("  chain id            : {}", word_to_u256(&parsed.chain_id));
+    println!(
+        "  ratifier (verifier) : {}",
+        render::checksum(&parsed.ratifier)
+    );
+    println!(
+        "  offers              : {} real, {} zero padding (tree height {})",
+        real.len(),
+        parsed.offers.len() - real.len(),
+        parsed.height
+    );
+
+    for (i, offer) in parsed.offers.iter().enumerate() {
+        if zero_offer(offer) {
+            println!("\nleaf[{i}]: (zero-offer padding - maker is 0x0, can never be taken)");
+        } else {
+            println!("\nleaf[{i}]:");
+            print!("{}", render::offer_text(offer, now));
+        }
+    }
+
+    println!("\nchecks:");
+    let mut ok = true;
+
+    // The load-bearing check: regenerating the canonical document from the parsed offers must
+    // reproduce the input exactly (up to address casing / key order). Then the wallet hashing
+    // THIS document produces exactly the digest computed below - no hidden fields, no tampered
+    // types table, no misread values.
+    let regenerated = eip712::typed_data(
+        &parsed.offers,
+        parsed.chain_id,
+        &parsed.ratifier,
+        parsed.height,
+    );
+    check(
+        &mut ok,
+        eip712::docs_equivalent(&doc, &regenerated),
+        "document is the canonical encoding of the offers shown",
+    );
+
+    check(
+        &mut ok,
+        parsed.height <= MAX_TREE_HEIGHT,
+        "tree height is at most 20 (TreeTooHigh)",
+    );
+    check(
+        &mut ok,
+        real.iter().all(|o| o.ratifier == parsed.ratifier),
+        "every offer's ratifier equals the verifying contract",
+    );
+    check(
+        &mut ok,
+        real.iter().all(|o| o.market.chain_id == parsed.chain_id),
+        "every offer's market.chainId equals the domain chain id",
+    );
+    check(
+        &mut ok,
+        real.windows(2).all(|w| w[0].maker == w[1].maker),
+        "every offer shares one maker (the signer)",
+    );
+
+    // Optional: assert the real leaves are exactly the maker's intended offers, in order.
+    if !offer_paths.is_empty() {
+        let intended = load_offers(offer_paths)?;
+        let matches =
+            real.len() == intended.len() && real.iter().zip(&intended).all(|(a, b)| **a == *b);
+        check(
+            &mut ok,
+            matches,
+            "leaves equal the intended offers passed via --offers",
+        );
+    }
+
+    let leaves: Vec<Word> = parsed.offers.iter().map(hash_offer).collect();
+    let tree = OfferTree::build(leaves).map_err(|e| format!("tree: {e:?}"))?;
+    let digest = tree_digest(
+        tree.root(),
+        parsed.height,
+        parsed.chain_id,
+        &parsed.ratifier,
+    );
+    println!(
+        "      merkle root       : {}",
+        render::hex_bytes(&tree.root())
+    );
+    println!("      DIGEST (to sign)  : {}", render::hex_bytes(&digest));
+
+    if let Some(exp) = expect {
+        let exp_word = parse_word(exp)?;
+        check(&mut ok, exp_word == digest, "digest equals --expect");
+    }
+
+    println!();
+    if ok {
+        println!(
+            "RESULT: PASS - signing this typed data authorizes exactly the {} offer(s) shown \
+             above, and nothing else.",
+            real.len()
+        );
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("RESULT: FAIL - do NOT sign; see failed checks above.");
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 fn cmd_digest(

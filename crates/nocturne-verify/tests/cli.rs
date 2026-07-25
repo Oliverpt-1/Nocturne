@@ -601,3 +601,104 @@ fn digest_expect_root_matches_and_mismatches() {
     assert_eq!(code, 1, "{stdout}");
     assert!(stdout.contains("Do NOT ratify"), "{stdout}");
 }
+
+// ---- EIP-712 typed-data (maker off-chain signing) payloads -----------------------
+
+fn write_temp(name: &str, contents: &str) -> String {
+    let p = std::env::temp_dir().join(format!("nocturne_{}_{name}", std::process::id()));
+    std::fs::write(&p, contents).unwrap();
+    p.to_str().unwrap().to_string()
+}
+
+#[test]
+fn verify_typed_production_payload_passes() {
+    // A real maker typed-data export from the app (23 offers + 9 zero-padding leaves,
+    // height 5, EcrecoverRatifier domain on Base).
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/typed_tree_prod.json"
+    );
+    let (stdout, _err, code) = run(&["verify-typed", path]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("23 real, 9 zero padding"), "{stdout}");
+    assert!(
+        stdout.contains("[PASS] document is the canonical encoding of the offers shown"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("RESULT: PASS"), "{stdout}");
+}
+
+#[test]
+fn verify_typed_fails_on_tampered_types_table() {
+    // Widening maxUnits to uint256 in the types table changes what the wallet hashes without
+    // changing any displayed value - the canonical-encoding check must catch it.
+    let raw = include_str!("data/typed_tree_prod.json");
+    let tampered = raw.replacen(
+        r#"{"name":"maxUnits","type":"uint128"}"#,
+        r#"{"name":"maxUnits","type":"uint256"}"#,
+        1,
+    );
+    assert_ne!(raw, tampered, "tamper target not found");
+    let path = write_temp("tampered_types.json", &tampered);
+    let (stdout, _err, code) = run(&["verify-typed", &path]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(
+        stdout.contains("[FAIL] document is the canonical encoding of the offers shown"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+}
+
+#[test]
+fn verify_typed_checks_leaves_against_intended_offers() {
+    // Two-offer tree: --offers with the same offers passes; a value tampered in the typed
+    // data (which the canonical check alone cannot catch) fails the intent comparison.
+    let maker: Address = [0x42; 20];
+    let mut offers = [offer_for(maker), offer_for(maker)];
+    offers[1].tick = word_from_u64(3376);
+    let td = serde_json::to_string(&nocturne_typed_data(&offers)).unwrap();
+    let td_path = write_temp("typed_two.json", &td);
+    let o0 = write_temp(
+        "typed_intent_0.json",
+        &serde_json::to_string(&offers[0]).unwrap(),
+    );
+    let o1 = write_temp(
+        "typed_intent_1.json",
+        &serde_json::to_string(&offers[1]).unwrap(),
+    );
+
+    let (stdout, _err, code) = run(&["verify-typed", &td_path, "--offers", &o0, &o1]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(
+        stdout.contains("[PASS] leaves equal the intended offers passed via --offers"),
+        "{stdout}"
+    );
+
+    // Tamper one displayed value: tick 3376 -> 1000. Canonical encoding stays valid, so only
+    // the --offers intent check can flag it.
+    let tampered = td.replacen(r#""tick":"3376""#, r#""tick":"1000""#, 1);
+    assert_ne!(td, tampered, "tamper target not found");
+    let bad_path = write_temp("typed_two_bad.json", &tampered);
+    let (stdout, _err, code) = run(&["verify-typed", &bad_path, "--offers", &o0, &o1]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(
+        stdout.contains("[FAIL] leaves equal the intended offers passed via --offers"),
+        "{stdout}"
+    );
+}
+
+/// Emit typed data through the binary (digest --eip712) so the test exercises the same
+/// document shape the tool itself produces.
+fn nocturne_typed_data(offers: &[Offer; 2]) -> serde_json::Value {
+    let o0 = write_temp(
+        "gen_offer_0.json",
+        &serde_json::to_string(&offers[0]).unwrap(),
+    );
+    let o1 = write_temp(
+        "gen_offer_1.json",
+        &serde_json::to_string(&offers[1]).unwrap(),
+    );
+    let (stdout, _err, code) = run(&["digest", &o0, &o1, "--eip712"]);
+    assert_eq!(code, 0, "{stdout}");
+    serde_json::from_str(&stdout).unwrap()
+}
