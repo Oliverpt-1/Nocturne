@@ -518,3 +518,86 @@ fn verify_production_setter_bundle_is_partial() {
     assert!(!stdout.contains("[FAIL]"), "{stdout}");
     assert!(stdout.contains("RESULT: PARTIAL"), "{stdout}");
 }
+
+// ---- setIsRootRatified (maker ratification) payloads -----------------------------
+
+/// Two same-maker offers written as JSON files plus the maker's ratify calldata for their
+/// tree root. Returns (calldata hex, [offer paths], root hex).
+fn ratify_fixture() -> (String, [String; 2], String) {
+    let maker: Address = [0x42; 20];
+    let mut offers = [offer_for(maker), offer_for(maker)];
+    offers[1].tick = word_from_u64(3376);
+    let dir = std::env::temp_dir();
+    let mut paths = Vec::new();
+    for (i, o) in offers.iter().enumerate() {
+        let p = dir.join(format!(
+            "nocturne_ratify_offer_{}_{i}.json",
+            std::process::id()
+        ));
+        std::fs::write(&p, serde_json::to_string(o).unwrap()).unwrap();
+        paths.push(p.to_str().unwrap().to_string());
+    }
+    let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
+    let calldata = encode_set_is_root_ratified_calldata(&maker, &tree.root(), true);
+    (
+        format!("0x{}", hex::encode(&calldata)),
+        [paths[0].clone(), paths[1].clone()],
+        format!("0x{}", hex::encode(tree.root())),
+    )
+}
+
+#[test]
+fn decode_production_ratify_payload() {
+    let payload = include_str!("../../nocturne/tests/data/setter_ratify_prod.hex").trim();
+    let (stdout, _err, code) = run(&["decode", payload]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("setIsRootRatified"), "{stdout}");
+    assert!(
+        stdout.contains("0xd418224aE3c510B645112FD9275CCFD50F996ee4"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("RATIFY"), "{stdout}");
+}
+
+#[test]
+fn verify_ratify_without_offers_is_partial() {
+    let (payload, _paths, _root) = ratify_fixture();
+    let (stdout, _err, code) = run(&["verify", &payload]);
+    assert_eq!(code, 2, "{stdout}");
+    assert!(stdout.contains("RESULT: PARTIAL"), "{stdout}");
+    assert!(stdout.contains("--offers"), "{stdout}");
+}
+
+#[test]
+fn verify_ratify_with_matching_offers_passes() {
+    let (payload, paths, _root) = ratify_fixture();
+    let (stdout, _err, code) = run(&["verify", &payload, "--offers", &paths[0], &paths[1]]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(
+        stdout.contains("[PASS] root commits to exactly the supplied offers"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("RESULT: PASS"), "{stdout}");
+}
+
+#[test]
+fn verify_ratify_with_wrong_offers_fails() {
+    // Same offers, wrong order: different leaf indices, different root.
+    let (payload, paths, _root) = ratify_fixture();
+    let (stdout, _err, code) = run(&["verify", &payload, "--offers", &paths[1], &paths[0]]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
+}
+
+#[test]
+fn digest_expect_root_matches_and_mismatches() {
+    let (_payload, paths, root) = ratify_fixture();
+    let (stdout, _err, code) = run(&["digest", &paths[0], &paths[1], "--expect-root", &root]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("MATCH: the root commits"), "{stdout}");
+
+    let bad = format!("0x{}", "ab".repeat(32));
+    let (stdout, _err, code) = run(&["digest", &paths[0], &paths[1], "--expect-root", &bad]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("Do NOT ratify"), "{stdout}");
+}

@@ -50,10 +50,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Verify a `take` or bundle payload: reproduce the signed Merkle root(s) and confirm
-    /// each signature recovers to its offer's maker. Exits non-zero if any check fails.
+    /// Verify a `take`, bundle, or `setIsRootRatified` payload: reproduce the Merkle root(s)
+    /// and confirm each authorization. Exits non-zero if any check fails.
     Verify {
-        /// The `take` or bundle calldata as hex.
+        /// The calldata as hex.
         payload: String,
         /// Chain id for the EIP-712 domain (defaults to the offer's `market.chainId`).
         #[arg(long)]
@@ -64,6 +64,10 @@ enum Command {
         /// Reference Unix time, used to compute APR in the printed terms.
         #[arg(long)]
         now: Option<u64>,
+        /// For a `setIsRootRatified` payload: your intended offer JSON files (order sets leaf
+        /// indices). The payload's root must commit to exactly these offers.
+        #[arg(long, num_args = 1..)]
+        offers: Vec<std::path::PathBuf>,
     },
     /// Reproduce the Merkle root and EIP-712 digest from the offer terms you *intend* to sign
     /// (JSON files), so you can compare against what a wallet displays.
@@ -79,6 +83,10 @@ enum Command {
         /// Assert the computed digest equals this 32-byte hex value; exit non-zero otherwise.
         #[arg(long)]
         expect: Option<String>,
+        /// Assert the computed Merkle root equals this 32-byte hex value (the SetterRatifier
+        /// flow: the root shown in a setIsRootRatified prompt); exit non-zero otherwise.
+        #[arg(long)]
+        expect_root: Option<String>,
         /// Emit the full EIP-712 typed-data JSON (for diffing against an eth_signTypedData_v4
         /// wallet) instead of the digest summary.
         #[arg(long)]
@@ -93,6 +101,7 @@ enum PayloadType {
     Offer,
     Ratifier,
     Cancel,
+    Ratify,
     MarketState,
     Position,
 }
@@ -111,18 +120,21 @@ fn main() -> ExitCode {
             chain_id,
             expected_maker,
             now,
-        } => cmd_verify(&payload, chain_id, expected_maker.as_deref(), now),
+            offers,
+        } => cmd_verify(&payload, chain_id, expected_maker.as_deref(), now, &offers),
         Command::Digest {
             offers,
             chain_id,
             ratifier,
             expect,
+            expect_root,
             eip712,
         } => cmd_digest(
             &offers,
             chain_id,
             ratifier.as_deref(),
             expect.as_deref(),
+            expect_root.as_deref(),
             eip712,
         ),
     };
@@ -183,6 +195,20 @@ fn cmd_decode(
                 print!("{}", render::ratifier_payload_text(&rd));
             }
         }
+        PayloadType::Ratify => {
+            let r = decode_set_is_root_ratified_calldata(&bytes).map_err(|e| e.to_string())?;
+            println!("Decoded setIsRootRatified(...) payload\n");
+            println!("  maker  : {}", render::checksum(&r.maker));
+            println!("  root   : {}", render::hex_bytes(&r.root));
+            println!(
+                "  action : {}",
+                if r.ratified {
+                    "RATIFY - authorize every offer under this root"
+                } else {
+                    "UNRATIFY - revoke every offer under this root"
+                }
+            );
+        }
         PayloadType::Cancel => {
             let (maker, root) = decode_cancel_root_calldata(&bytes).map_err(|e| e.to_string())?;
             println!("Decoded cancelRoot(...) payload\n");
@@ -208,12 +234,17 @@ fn cmd_verify(
     chain_id: Option<u64>,
     expected_maker: Option<&str>,
     now: Option<u64>,
+    offers: &[std::path::PathBuf],
 ) -> Result<ExitCode, String> {
     let bytes = parse_hex(payload)?;
-    if bytes.len() >= 4
-        && BundleKind::from_selector([bytes[0], bytes[1], bytes[2], bytes[3]]).is_some()
-    {
-        return cmd_verify_bundle(&bytes, chain_id, expected_maker, now);
+    if bytes.len() >= 4 {
+        let sel = [bytes[0], bytes[1], bytes[2], bytes[3]];
+        if BundleKind::from_selector(sel).is_some() {
+            return cmd_verify_bundle(&bytes, chain_id, expected_maker, now);
+        }
+        if sel == SET_IS_ROOT_RATIFIED_SELECTOR {
+            return cmd_verify_ratify(&bytes, offers);
+        }
     }
     let t = decode_take_calldata(&bytes).map_err(|e| e.to_string())?;
 
@@ -258,6 +289,83 @@ fn verdict(ok: bool, partial: bool, fills: usize) -> ExitCode {
             "RESULT: PASS - all {fills} fill signatures authorize exactly the offers shown above."
         );
         ExitCode::SUCCESS
+    }
+}
+
+/// Verify a maker's `setIsRootRatified` transaction: decode it and, when the maker's intended
+/// offers are supplied, prove the root commits to exactly those offers - the maker-side
+/// anti-blind-signing check (the payload alone is a bare 32-byte root the wallet cannot
+/// explain).
+fn cmd_verify_ratify(bytes: &[u8], offer_paths: &[std::path::PathBuf]) -> Result<ExitCode, String> {
+    let r = decode_set_is_root_ratified_calldata(bytes).map_err(|e| e.to_string())?;
+
+    println!("Verifying SetterRatifier ratification payload\n");
+    println!("  maker               : {}", render::checksum(&r.maker));
+    println!("  root                : {}", render::hex_bytes(&r.root));
+    println!(
+        "  action              : {}",
+        if r.ratified {
+            "RATIFY - authorize every offer under this root"
+        } else {
+            "UNRATIFY - revoke every offer under this root"
+        }
+    );
+
+    if offer_paths.is_empty() {
+        println!(
+            "\n  [INFO] a bare root cannot be verified by itself; pass --offers <your offer \
+             JSON files>\n         to prove this root commits to exactly your intended offers"
+        );
+        println!(
+            "\nRESULT: PARTIAL - payload decoded, but the root was not checked against your \
+             intended terms."
+        );
+        return Ok(ExitCode::from(2));
+    }
+
+    let offers = load_offers(offer_paths)?;
+    let leaves: Vec<Word> = offers.iter().map(hash_offer).collect();
+    let tree = OfferTree::build(leaves).map_err(|e| format!("tree: {e:?}"))?;
+
+    println!("\nchecks:");
+    let mut ok = true;
+
+    // Every offer in a tree must share the payload's maker: setIsRootRatified binds
+    // isRootRatified[maker][root], so an offer with a different maker can never ratify.
+    check(
+        &mut ok,
+        offers.iter().all(|o| o.maker == r.maker),
+        "every offer's maker equals the payload's maker",
+    );
+
+    let root_matches = tree.root() == r.root;
+    check(
+        &mut ok,
+        root_matches,
+        "root commits to exactly the supplied offers",
+    );
+    println!(
+        "      computed root     : {}",
+        render::hex_bytes(&tree.root())
+    );
+    println!(
+        "      offers committed  : {} (tree height {})",
+        offers.len(),
+        tree.height()
+    );
+
+    println!();
+    if ok {
+        println!(
+            "RESULT: PASS - this transaction {} exactly the {} offer(s) you supplied, and \
+             nothing else.",
+            if r.ratified { "authorizes" } else { "revokes" },
+            offers.len()
+        );
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("RESULT: FAIL - do NOT sign; the root does not correspond to your terms.");
+        Ok(ExitCode::FAILURE)
     }
 }
 
@@ -407,18 +515,10 @@ fn cmd_digest(
     chain_id: Option<u64>,
     ratifier: Option<&str>,
     expect: Option<&str>,
+    expect_root: Option<&str>,
     eip712: bool,
 ) -> Result<ExitCode, String> {
-    if paths.is_empty() {
-        return Err("provide at least one offer JSON file".to_string());
-    }
-    let mut offers = Vec::new();
-    for p in paths {
-        let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
-        let offer: Offer =
-            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
-        offers.push(offer);
-    }
+    let offers = load_offers(paths)?;
 
     let chain_id_word = match chain_id {
         Some(id) => word_from_u64(id),
@@ -456,12 +556,12 @@ fn cmd_digest(
     println!("  domain separator    : {}", render::hex_bytes(&domain));
     println!("  DIGEST (to sign)    : {}", render::hex_bytes(&digest));
 
+    let mut code = ExitCode::SUCCESS;
     if let Some(exp) = expect {
         let exp_word = parse_word(exp)?;
         println!();
         if exp_word == digest {
             println!("MATCH: the wallet digest matches the intended terms.");
-            Ok(ExitCode::SUCCESS)
         } else {
             println!(
                 "MISMATCH: --expect {} != {}",
@@ -469,14 +569,43 @@ fn cmd_digest(
                 render::hex_bytes(&digest)
             );
             println!("Do NOT sign: the digest does not correspond to these terms.");
-            Ok(ExitCode::FAILURE)
+            code = ExitCode::FAILURE;
         }
-    } else {
-        Ok(ExitCode::SUCCESS)
     }
+    if let Some(exp) = expect_root {
+        let exp_word = parse_word(exp)?;
+        println!();
+        if exp_word == root {
+            println!("MATCH: the root commits to exactly these offers.");
+        } else {
+            println!(
+                "MISMATCH: --expect-root {} != {}",
+                render::hex_bytes(&exp_word),
+                render::hex_bytes(&root)
+            );
+            println!("Do NOT ratify: the root does not correspond to these terms.");
+            code = ExitCode::FAILURE;
+        }
+    }
+    Ok(code)
 }
 
 // ---- helpers -----------------------------------------------------------------
+
+/// Load serialized `Offer`s from JSON files, one per leaf, in order.
+fn load_offers(paths: &[std::path::PathBuf]) -> Result<Vec<Offer>, String> {
+    if paths.is_empty() {
+        return Err("provide at least one offer JSON file".to_string());
+    }
+    let mut offers = Vec::new();
+    for p in paths {
+        let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        let offer: Offer =
+            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
+        offers.push(offer);
+    }
+    Ok(offers)
+}
 
 fn check(ok: &mut bool, pass: bool, label: &str) {
     println!("  [{}] {label}", if pass { "PASS" } else { "FAIL" });
@@ -493,6 +622,9 @@ fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
         }
         if sel == CANCEL_ROOT_SELECTOR {
             return Ok(PayloadType::Cancel);
+        }
+        if sel == SET_IS_ROOT_RATIFIED_SELECTOR {
+            return Ok(PayloadType::Ratify);
         }
         if BundleKind::from_selector(sel).is_some() {
             return Ok(PayloadType::Bundle);
