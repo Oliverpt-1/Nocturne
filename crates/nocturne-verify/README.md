@@ -33,13 +33,16 @@ Prebuilt macOS/Linux binaries are attached to each [GitHub release](https://gith
 
 ### `verify` — check a payload you're about to submit or that was handed to you
 
-From raw `take` calldata, reproduce the signed Merkle root and confirm the signature recovers to
-the offer's maker. Prints a per-check PASS/FAIL and exits non-zero if anything fails.
+From raw `take` calldata — or a `midnightBundlesV1*` bundle wrapping several takes — reproduce
+each signed Merkle root and confirm each signature recovers to its offer's maker. Prints a
+per-check PASS/FAIL and exits non-zero if anything fails.
 
 ```sh
 nocturne-verify verify 0x6a14c9ef... --chain-id 31337
 # optionally assert the signer:
 nocturne-verify verify 0x6a14c9ef... --chain-id 31337 --expected-maker 0xYourMaker
+# bundles are auto-detected; every embedded fill is verified, one bad fill fails the bundle:
+nocturne-verify verify 0xa85d52e5...
 ```
 
 The chain id defaults to the offer's own `market.chainId`; pass `--chain-id` to also assert they
@@ -54,13 +57,20 @@ or a `FAIL` with the failing checks listed.
 ### `decode` — read any payload in plain terms
 
 ```sh
-nocturne-verify decode 0x6a14c9ef...            # auto-detects take / offer / cancelRoot
+nocturne-verify decode 0x6a14c9ef...            # auto-detects take / bundle / offer / cancelRoot
 nocturne-verify decode 0x... --type market-state # getter returns have no selector; name the type
 nocturne-verify decode 0x... --now 1700000000    # compute APR against a reference time
 nocturne-verify decode 0x... --json              # machine-readable output
 ```
 
-Types: `take`, `offer`, `ratifier`, `cancel`, `market-state`, `position`.
+Types: `take`, `bundle`, `offer`, `ratifier`, `cancel`, `market-state`, `position`.
+
+Bundle payloads (`midnightBundlesV1BuyWithUnitsTargetAndWithdrawCollateral`,
+`...SupplyCollateralAndSellWithUnitsTarget`, and their `AssetsTarget` variants) decode into the
+wrapper's taker-side arguments — targets/limits, permits, collateral moves, referral fee,
+deadline — followed by every embedded `(offer, ratifierData, units)` fill. The wrapper arguments
+are **not** covered by any maker signature; only the fills are, and each verifies exactly like a
+bare take.
 
 ### `digest` — reproduce the digest from the terms *you* intend to sign
 
@@ -77,6 +87,31 @@ nocturne-verify digest offer.json --chain-id 31337 --eip712
 ```
 
 `--chain-id` and `--ratifier` default to the first offer's `market.chainId` and `ratifier`.
+
+## Fetching the payload to verify
+
+Where to get the hex this tool consumes, depending on which side of the trade you're on:
+
+**Taker — before submitting a transaction.** When your wallet prompts you to confirm, copy the
+raw transaction data instead of trusting the summary: in MetaMask, open the confirmation's
+**Data / Hex** tab and copy the full hex; in Rabby and most other wallets, expand the
+transaction details to find the raw calldata. Paste it into `nocturne-verify verify`. This works
+for both bare `take` calls and the app's `midnightBundlesV1*` bundles.
+
+**Anyone — after the fact.** On the explorer (e.g. Basescan), open the transaction → **Input
+Data** → *View Input As → Original*. Copy the entire field — a bundle with several fills runs to
+kilobytes of hex, and a partial copy is unverifiable (the tool detects truncation and refuses
+rather than reporting on a partial payload; use *Copy*, don't drag-select).
+
+**Maker — before signing offers.** What your wallet shows depends on the app's signing mode,
+toggled under **Settings (gear icon) → Allow off-chain signing**:
+
+- **Toggle on** — the app requests an `eth_signTypedData_v4` signature over the *entire offer
+  tree*, so the wallet displays every field. Cross-check it with
+  `nocturne-verify digest offers... --eip712` and diff the typed data, or `--expect` the digest.
+- **Toggle off (default)** — you sign just the Merkle *root* digest: a bare 32-byte value the
+  wallet cannot explain. Reproduce it from your intended terms with `nocturne-verify digest`
+  and compare before approving. Never sign a root digest you haven't reproduced.
 
 ## Two workflows — and which one is stronger
 
