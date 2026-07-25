@@ -143,11 +143,14 @@ rather than reporting on a partial payload; use *Copy*, don't drag-select).
 toggled under **Settings (gear icon) → Allow off-chain signing**:
 
 - **Toggle on** — the app requests an `eth_signTypedData_v4` signature over the *entire offer
-  tree*, so the wallet displays every field. Cross-check it with
-  `nocturne-verify digest offers... --eip712` and diff the typed data, or `--expect` the digest.
-- **Toggle off (default)** — you sign just the Merkle *root* digest: a bare 32-byte value the
-  wallet cannot explain. Reproduce it from your intended terms with `nocturne-verify digest`
-  and compare before approving. Never sign a root digest you haven't reproduced.
+  tree*. Save the typed-data JSON the app/wallet shows to a file (any name — `payload.json`)
+  and run `nocturne-verify verify-typed payload.json` before approving. Unlike take/bundle
+  hex, this payload is a file argument, not pasted inline.
+- **Toggle off (default)** — you confirm a `setIsRootRatified` transaction carrying a bare
+  32-byte root the wallet cannot explain. Copy its calldata and run
+  `nocturne-verify verify 0x2fd0e45d... --offers <your offer JSONs>`, or reproduce the root
+  from your terms with `nocturne-verify digest ... --expect-root`. Never approve a root you
+  haven't reproduced.
 
 ## Two workflows — and which one is stronger
 
