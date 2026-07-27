@@ -368,6 +368,12 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
     if U256::from(ctx.market.continuous_fee) > word_to_u256(&offer.continuous_fee_cap) {
         reverts.push(OfferError::ContinuousFeeAboveOfferCap);
     }
+    // The unused receiver side must be zero (Midnight.take). Only the offer-side half (a buy
+    // offer's receiverIfMakerIsSeller) is computable here; the sell-side half constrains the
+    // taker's own receiver argument, which the simulator does not take.
+    if offer.buy && offer.receiver_if_maker_is_seller != [0u8; 20] {
+        reverts.push(OfferError::UnusedReceiverMustBeZero);
+    }
     if let Ok(tick) = tick_u64(offer) {
         if ctx.market.tick_spacing > 0 && tick % ctx.market.tick_spacing as u64 != 0 {
             reverts.push(OfferError::TickNotAccessible);

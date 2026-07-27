@@ -269,3 +269,20 @@ fn simulate_continuous_fee_accrues_to_buyer() {
     // = 1000 * (1e9 * 1e9) / 1e18 = 1000 * 1e18 / 1e18 = 1000.
     assert_eq!(out.buyer_pending_fee_increase, U256::from(1_000u64));
 }
+
+#[test]
+fn buy_offer_with_nonzero_receiver_reverts_unused_receiver() {
+    // Midnight.take requires the UNUSED receiver side to be zero: for a buy offer that is
+    // receiverIfMakerIsSeller. A nonzero value makes every take revert on-chain.
+    let mut offer = buy_offer();
+    offer.receiver_if_maker_is_seller = [0x99; 20];
+    let out = simulate_take(&offer, U256::from(1u64), &base_ctx()).unwrap();
+    assert!(out.reverts.contains(&OfferError::UnusedReceiverMustBeZero));
+
+    // For a sell offer the field is the USED side - no revert from it.
+    let mut offer = buy_offer();
+    offer.buy = false;
+    offer.receiver_if_maker_is_seller = [0x99; 20];
+    let out = simulate_take(&offer, U256::from(1u64), &base_ctx()).unwrap();
+    assert!(!out.reverts.contains(&OfferError::UnusedReceiverMustBeZero));
+}
