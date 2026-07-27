@@ -286,3 +286,21 @@ fn buy_offer_with_nonzero_receiver_reverts_unused_receiver() {
     let out = simulate_take(&offer, U256::from(1u64), &base_ctx()).unwrap();
     assert!(!out.reverts.contains(&OfferError::UnusedReceiverMustBeZero));
 }
+
+#[test]
+fn uncreated_market_checks_tick_against_default_spacing() {
+    // touchMarket creates a fresh market with DEFAULT_TICK_SPACING (4) before take checks
+    // tick % spacing, so spacing 0 (not created) must not disable the check.
+    let mut ctx = base_ctx();
+    ctx.market.tick_spacing = 0;
+
+    // buy_offer's tick is 8: a multiple of 4, accessible on a fresh market.
+    let out = simulate_take(&buy_offer(), U256::from(1u64), &ctx).unwrap();
+    assert!(!out.reverts.contains(&OfferError::TickNotAccessible));
+
+    // Tick 9 is not a multiple of 4: every take on a fresh market reverts.
+    let mut offer = buy_offer();
+    offer.tick = word_from_u64(9);
+    let out = simulate_take(&offer, U256::from(1u64), &ctx).unwrap();
+    assert!(out.reverts.contains(&OfferError::TickNotAccessible));
+}

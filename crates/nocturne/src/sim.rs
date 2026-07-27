@@ -302,7 +302,9 @@ pub struct Position {
 /// Market state needed to simulate a take.
 #[derive(Clone, Copy, Debug)]
 pub struct SimMarket {
-    /// Current tick spacing (0 means the market isn't created).
+    /// Current tick spacing. Pass 0 for a not-yet-created market: take() would create it via
+    /// touchMarket with [`DEFAULT_TICK_SPACING`](crate::DEFAULT_TICK_SPACING), which is what
+    /// the simulation then checks the tick against.
     pub tick_spacing: u8,
     /// Market continuous fee (same scaling as the on-chain `uint32`).
     pub continuous_fee: u128,
@@ -374,8 +376,16 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
     if offer.buy && offer.receiver_if_maker_is_seller != [0u8; 20] {
         reverts.push(OfferError::UnusedReceiverMustBeZero);
     }
+    // On-chain, take() first runs touchMarket, which creates a not-yet-existing market with
+    // DEFAULT_TICK_SPACING and then checks tick % spacing - so an uncreated market (spacing 0
+    // here) is checked against the default, never skipped.
     if let Ok(tick) = tick_u64(offer) {
-        if ctx.market.tick_spacing > 0 && tick % ctx.market.tick_spacing as u64 != 0 {
+        let spacing = if ctx.market.tick_spacing == 0 {
+            crate::DEFAULT_TICK_SPACING
+        } else {
+            ctx.market.tick_spacing
+        };
+        if tick % spacing as u64 != 0 {
             reverts.push(OfferError::TickNotAccessible);
         }
     }
