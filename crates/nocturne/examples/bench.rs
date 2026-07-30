@@ -76,11 +76,6 @@ fn pipeline(offers: &[Offer], sk: &SigningKey, parallel: bool) -> (Word, u128) {
 fn main() {
     let sk = SigningKey::from_bytes(&[0x42u8; 32].into()).unwrap();
 
-    // Cross-check root for a fixed small tree so the JS baseline can assert byte-parity.
-    let small: Vec<Offer> = (0..4).map(sample_offer).collect();
-    let (root, _) = pipeline(&small, &sk, false);
-    println!("CROSSCHECK_ROOT_N4 0x{}", hex(&root));
-
     for &n in &[1024usize, 4096, 16384] {
         let offers: Vec<Offer> = (0..n as u64).map(sample_offer).collect();
         // warmup
@@ -99,8 +94,4 @@ fn main() {
             pt as f64 * 1000.0 / n as f64
         );
     }
-}
-
-fn hex(w: &Word) -> String {
-    w.iter().map(|b| format!("{b:02x}")).collect()
 }

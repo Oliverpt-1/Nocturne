@@ -12,6 +12,16 @@ readme = "../../README.md"
 keywords = ["ethereum", "eip712", "morpho", "midnight", "defi"]
 categories = ["cryptography::cryptocurrencies", "finance", "encoding"]
 
+# Drivers for the live e2e harness (invoked by e2e/run.sh and e2e/mm.sh). They live next to
+# their scripts rather than in examples/, which holds the SDK usage recipes.
+[[example]]
+name = "e2e"
+path = "e2e/e2e.rs"
+
+[[example]]
+name = "mm_loop"
+path = "e2e/mm_loop.rs"
+
 [dependencies]
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
