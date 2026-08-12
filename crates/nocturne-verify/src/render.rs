@@ -532,6 +532,45 @@ pub fn bundle_json(b: &BundleCall) -> Value {
     })
 }
 
+pub fn cancel_json(maker: &Address, root: &Word) -> Value {
+    json!({
+        "maker": checksum(maker),
+        "root": hex_bytes(root),
+    })
+}
+
+pub fn ratify_json(r: &RatifyCall) -> Value {
+    json!({
+        "maker": checksum(&r.maker),
+        "root": hex_bytes(&r.root),
+        "ratified": r.ratified,
+    })
+}
+
+pub fn market_state_json(m: &MarketStateView) -> Value {
+    json!({
+        "totalUnits": m.total_units.to_string(),
+        "lossFactor": m.loss_factor.to_string(),
+        "lossFactorMaxed": m.loss_factor == u128::MAX,
+        "withdrawable": m.withdrawable.to_string(),
+        "continuousFeeCredit": m.continuous_fee_credit.to_string(),
+        "settlementFeeCbp": m.settlement_fee_cbp,
+        "continuousFee": m.continuous_fee,
+        "tickSpacing": m.tick_spacing,
+    })
+}
+
+pub fn position_json(p: &PositionView) -> Value {
+    json!({
+        "credit": p.credit.to_string(),
+        "pendingFee": p.pending_fee.to_string(),
+        "lastLossFactor": p.last_loss_factor.to_string(),
+        "lastAccrual": p.last_accrual.to_string(),
+        "debt": p.debt.to_string(),
+        "collateralBitmap": p.collateral_bitmap.to_string(),
+    })
+}
+
 pub fn market_state_text(m: &MarketStateView) -> String {
     format!(
         "  total units         : {}\n  loss factor         : {}{}\n  withdrawable        : {}\n  continuous fee credit: {}\n  settlement fee cbp  : {:?}\n  continuous fee      : {}\n  tick spacing        : {}\n",

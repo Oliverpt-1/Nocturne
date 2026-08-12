@@ -12,6 +12,17 @@ ACCOUNT0=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
 MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a morpho-org/midnight checkout at rev f47568c9}"
+SCRIPT_DIR="$MID/script"
+DEPLOY_SCRIPT="$SCRIPT_DIR/DeployMM.s.sol"
+CREATED_SCRIPT_DIR=0
+COPIED_DEPLOY_SCRIPT=0
+ANVIL_PID=""
+cleanup() {
+  if [ "$COPIED_DEPLOY_SCRIPT" -eq 1 ]; then rm -f "$DEPLOY_SCRIPT"; fi
+  if [ "$CREATED_SCRIPT_DIR" -eq 1 ]; then rmdir "$SCRIPT_DIR" 2>/dev/null || true; fi
+  if [ -n "$ANVIL_PID" ]; then kill "$ANVIL_PID" 2>/dev/null || true; wait "$ANVIL_PID" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
 PASS=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; exit 1; }
@@ -24,13 +35,22 @@ consumed(){ cast call "$MIDNIGHT" 'consumed(address,bytes32)(uint128)' "$1" "$(p
 send()    { cast send "$1" "$2" --rpc-url "$RPC" --private-key "$3" >/dev/null; }
 
 echo "== deploy REAL Midnight for the MM loop =="
-pkill -f "anvil --port 8545" 2>/dev/null || true; sleep 1
+if [ -e "$DEPLOY_SCRIPT" ]; then fail "refusing to overwrite existing $DEPLOY_SCRIPT"; fi
+if (echo >/dev/tcp/127.0.0.1/8545) 2>/dev/null; then fail "port 8545 is already in use"; fi
 # fixed genesis timestamp so "1 year to maturity" is exact -> realistic APR quoting
 anvil --port 8545 --timestamp 1000000000 --silent >/tmp/nocturne-mm-anvil.log 2>&1 &
+ANVIL_PID=$!
 sleep 3
-cp "$CRATE/e2e/DeployMM.s.sol" "$MID/script/DeployMM.s.sol"
-D=$(cd "$MID" && forge script script/DeployMM.s.sol --tc DeployMM --rpc-url "$RPC" --broadcast --private-key "$PK0" 2>&1)
-rm -f "$MID/script/DeployMM.s.sol"
+kill -0 "$ANVIL_PID" 2>/dev/null || fail "anvil failed to start (is port 8545 already in use?)"
+if [ ! -d "$SCRIPT_DIR" ]; then mkdir -p "$SCRIPT_DIR"; CREATED_SCRIPT_DIR=1; fi
+cp "$CRATE/e2e/DeployMM.s.sol" "$DEPLOY_SCRIPT"
+COPIED_DEPLOY_SCRIPT=1
+if ! D=$(cd "$MID" && FOUNDRY_BROADCAST="$CRATE/../../target/nocturne-mm-broadcast" forge script script/DeployMM.s.sol --tc DeployMM --rpc-url "$RPC" --broadcast --private-key "$PK0" 2>&1); then
+  echo "$D" >&2
+  fail "deploy"
+fi
+rm -f "$DEPLOY_SCRIPT"
+COPIED_DEPLOY_SCRIPT=0
 grep -q "ONCHAIN EXECUTION COMPLETE & SUCCESSFUL" <<<"$D" || fail "deploy"
 ga() { grep -E "^  $1 " <<<"$D" | awk '{print $2}'; }
 export MIDNIGHT=$(ga MIDNIGHT) RATIFIER=$(ga RATIFIER) LOAN=$(ga LOAN) COLLATERAL=$(ga COLLATERAL) ORACLE=$(ga ORACLE)
@@ -72,6 +92,5 @@ eq "new grid rung0: seller assets" "$(( $(loanbal "$ACCOUNT0") - LB ))" "$(g2 R0
 eq "maker credit after re-quote" "$(credit "$MAKER")" "2800000"
 eq "taker debt after re-quote"   "$(debt "$ACCOUNT0")" "2800000"
 
-pkill -f "anvil --port 8545" 2>/dev/null || true
 echo ""
 echo "MM LOOP: ALL $PASS CHECKS PASSED against real Midnight on anvil."
