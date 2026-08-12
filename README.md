@@ -41,26 +41,11 @@ deployment, but it has **not** been independently security-audited. Verify again
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
 - Open a [GitHub issue](https://github.com/Oliverpt-1/midnight-rust/issues) for bugs and features.
 
-## For Developers
+## Rust SDK
 
-Add the crate and call it from your own program:
-
-```toml
-[dependencies]
-nocturne = { path = "crates/nocturne" }
-```
-
-The full API - every callable - is on **[docs.rs/nocturne](https://docs.rs/nocturne)** (once
-published), or locally with `cargo doc --open`. The crate root has a copy-paste quickstart.
-
-The programs in [`examples/`](crates/nocturne/examples/) are **illustrative demos** - dummy keys
-and addresses, nothing touches a chain. They show how to call the API; they don't post real
-offers:
-
-```sh
-cargo run --example quickstart        # demo: build -> sign -> verify an offer in memory
-cargo run --release --example bench   # perf: time the hash -> tree -> sign pipeline
-```
+See the [`nocturne` crate README](crates/nocturne/README.md) for installation, a copy-paste
+quickstart, common workflows, and runnable examples. The complete API is available on
+[docs.rs/nocturne](https://docs.rs/nocturne).
 
 ## Verifying payloads
 

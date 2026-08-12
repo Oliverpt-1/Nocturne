@@ -8,7 +8,7 @@ authors = ["Oliver Tipton <oliverptipton@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Oliverpt-1/midnight-rust"
 homepage = "https://github.com/Oliverpt-1/midnight-rust"
-readme = "../../README.md"
+readme = "README.md"
 keywords = ["ethereum", "eip712", "morpho", "midnight", "defi"]
 categories = ["cryptography::cryptocurrencies", "finance", "encoding"]
 
