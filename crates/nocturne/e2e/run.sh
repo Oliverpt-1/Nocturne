@@ -13,18 +13,38 @@ GROUP=0x0000000000000000000000000000000000000000000000000000000000000001
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
 MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a morpho-org/midnight checkout at rev f47568c9}"
+SCRIPT_DIR="$MID/script"
+DEPLOY_SCRIPT="$SCRIPT_DIR/DeployE2E.s.sol"
+CREATED_SCRIPT_DIR=0
+COPIED_DEPLOY_SCRIPT=0
+ANVIL_PID=""
+cleanup() {
+  if [ "$COPIED_DEPLOY_SCRIPT" -eq 1 ]; then rm -f "$DEPLOY_SCRIPT"; fi
+  if [ "$CREATED_SCRIPT_DIR" -eq 1 ]; then rmdir "$SCRIPT_DIR" 2>/dev/null || true; fi
+  if [ -n "$ANVIL_PID" ]; then kill "$ANVIL_PID" 2>/dev/null || true; wait "$ANVIL_PID" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
 PASS=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; exit 1; }
 eq()   { local a="${2%% *}" b="${3%% *}"; [ "$a" = "$b" ] && ok "$1 ($a)" || fail "$1: got '$a' expected '$b'"; }
 
 echo "== 1. start anvil + deploy REAL Midnight =="
-pkill -f "anvil --port 8545" 2>/dev/null || true; sleep 1
+if [ -e "$DEPLOY_SCRIPT" ]; then fail "refusing to overwrite existing $DEPLOY_SCRIPT"; fi
+if (echo >/dev/tcp/127.0.0.1/8545) 2>/dev/null; then fail "port 8545 is already in use"; fi
 anvil --port 8545 --silent >/tmp/nocturne-anvil.log 2>&1 &
+ANVIL_PID=$!
 sleep 3
-cp "$CRATE/e2e/DeployE2E.s.sol" "$MID/script/DeployE2E.s.sol"
-DEPLOY=$(cd "$MID" && forge script script/DeployE2E.s.sol --tc DeployE2E --rpc-url "$RPC" --broadcast --private-key "$PK0" 2>&1)
-rm -f "$MID/script/DeployE2E.s.sol"
+kill -0 "$ANVIL_PID" 2>/dev/null || fail "anvil failed to start (is port 8545 already in use?)"
+if [ ! -d "$SCRIPT_DIR" ]; then mkdir -p "$SCRIPT_DIR"; CREATED_SCRIPT_DIR=1; fi
+cp "$CRATE/e2e/DeployE2E.s.sol" "$DEPLOY_SCRIPT"
+COPIED_DEPLOY_SCRIPT=1
+if ! DEPLOY=$(cd "$MID" && FOUNDRY_BROADCAST="$CRATE/../../target/nocturne-e2e-broadcast" forge script script/DeployE2E.s.sol --tc DeployE2E --rpc-url "$RPC" --broadcast --private-key "$PK0" 2>&1); then
+  echo "$DEPLOY" >&2
+  fail "deploy"
+fi
+rm -f "$DEPLOY_SCRIPT"
+COPIED_DEPLOY_SCRIPT=0
 grep -q "ONCHAIN EXECUTION COMPLETE & SUCCESSFUL" <<<"$DEPLOY" || fail "deploy"
 getaddr() { grep -E "^  $1 " <<<"$DEPLOY" | awk '{print $2}'; }
 export MIDNIGHT=$(getaddr MIDNIGHT) RATIFIER=$(getaddr RATIFIER) AUTHORIZER=$(getaddr AUTHORIZER)
@@ -90,6 +110,5 @@ else
   ok "re-take reverted after cancelRoot (RootCanceled)"
 fi
 
-pkill -f "anvil --port 8545" 2>/dev/null || true
 echo ""
 echo "ALL $PASS CHECKS PASSED against real Midnight on anvil."

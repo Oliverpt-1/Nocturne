@@ -116,6 +116,56 @@ fn decode_json_is_valid_json() {
 }
 
 #[test]
+fn decode_json_is_valid_for_cancel_ratify_and_getter_returns() {
+    let maker = [0x42; 20];
+    let root = [0x77; 32];
+    let cancel = format!(
+        "0x{}",
+        hex::encode(encode_cancel_root_calldata(&maker, &root))
+    );
+    let ratify = format!(
+        "0x{}",
+        hex::encode(encode_set_is_root_ratified_calldata(&maker, &root, true))
+    );
+
+    let mut market_state = Vec::new();
+    for value in 1..=13 {
+        market_state.extend_from_slice(&word_from_u128(value));
+    }
+    let market_state = format!("0x{}", hex::encode(market_state));
+
+    let mut position = Vec::new();
+    for value in 1..=6 {
+        position.extend_from_slice(&word_from_u128(value));
+    }
+    let position = format!("0x{}", hex::encode(position));
+
+    for (args, expected) in [
+        (
+            vec!["decode", &cancel, "--json"],
+            ("maker", serde_json::json!(render_addr(&maker))),
+        ),
+        (
+            vec!["decode", &ratify, "--json"],
+            ("ratified", serde_json::json!(true)),
+        ),
+        (
+            vec!["decode", &market_state, "--type", "market-state", "--json"],
+            ("totalUnits", serde_json::json!("1")),
+        ),
+        (
+            vec!["decode", &position, "--type", "position", "--json"],
+            ("credit", serde_json::json!("1")),
+        ),
+    ] {
+        let (stdout, stderr, code) = run(&args);
+        assert_eq!(code, 0, "{stderr}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+        assert_eq!(value[expected.0], expected.1, "{stdout}");
+    }
+}
+
+#[test]
 fn verify_passes_for_good_payload() {
     let (hex, _offer, signer) = signed_take();
     let (stdout, _err, code) = run(&["verify", &hex, "--chain-id", "31337"]);
@@ -280,6 +330,61 @@ fn digest_eip712_emits_valid_typed_data() {
     );
 
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn digest_eip712_enforces_matching_and_mismatching_assertions() {
+    let (_hex, offer, _) = signed_take();
+    let path_buf = std::env::temp_dir().join(format!(
+        "nocturne_verify_eip712_assertions_{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path_buf, serde_json::to_string(&offer).unwrap()).unwrap();
+    let path = path_buf.to_str().unwrap();
+
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    let root = format!("0x{}", hex::encode(tree.root()));
+    let digest = format!(
+        "0x{}",
+        hex::encode(tree_digest(
+            tree.root(),
+            tree.height(),
+            offer.market.chain_id,
+            &offer.ratifier,
+        ))
+    );
+
+    let (stdout, stderr, code) = run(&[
+        "digest",
+        path,
+        "--eip712",
+        "--expect",
+        &digest,
+        "--expect-root",
+        &root,
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    serde_json::from_str::<serde_json::Value>(&stdout).expect("matching output is JSON");
+
+    let bad_digest = format!("0x{}", "11".repeat(32));
+    let (stdout, stderr, code) = run(&["digest", path, "--eip712", "--expect", &bad_digest]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(
+        stdout.is_empty(),
+        "mismatch must not emit a signable document"
+    );
+    assert!(stderr.contains("MISMATCH: --expect"), "{stderr}");
+
+    let bad_root = format!("0x{}", "22".repeat(32));
+    let (stdout, stderr, code) = run(&["digest", path, "--eip712", "--expect-root", &bad_root]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(
+        stdout.is_empty(),
+        "mismatch must not emit a signable document"
+    );
+    assert!(stderr.contains("MISMATCH: --expect-root"), "{stderr}");
+
+    let _ = std::fs::remove_file(path_buf);
 }
 
 #[test]

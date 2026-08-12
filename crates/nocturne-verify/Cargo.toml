@@ -2,7 +2,7 @@
 name = "nocturne-verify"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.90"
 description = "Offline decoder and signature/Merkle-root verifier for Morpho Midnight offer payloads - lets a signer independently reproduce and check what they are about to sign."
 authors = ["Oliver Tipton <oliverptipton@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ name = "nocturne-verify"
 path = "src/main.rs"
 
 [dependencies]
-nocturne = { path = "../nocturne" }
+nocturne = { version = "0.1.0", path = "../nocturne" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

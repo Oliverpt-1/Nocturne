@@ -220,33 +220,49 @@ fn cmd_decode(
         }
         PayloadType::Ratify => {
             let r = decode_set_is_root_ratified_calldata(&bytes).map_err(|e| e.to_string())?;
-            println!("Decoded setIsRootRatified(...) payload\n");
-            println!("  maker  : {}", render::checksum(&r.maker));
-            println!("  root   : {}", render::hex_bytes(&r.root));
-            println!(
-                "  action : {}",
-                if r.ratified {
-                    "RATIFY - authorize every offer under this root"
-                } else {
-                    "UNRATIFY - revoke every offer under this root"
-                }
-            );
+            if json {
+                print_json(&render::ratify_json(&r));
+            } else {
+                println!("Decoded setIsRootRatified(...) payload\n");
+                println!("  maker  : {}", render::checksum(&r.maker));
+                println!("  root   : {}", render::hex_bytes(&r.root));
+                println!(
+                    "  action : {}",
+                    if r.ratified {
+                        "RATIFY - authorize every offer under this root"
+                    } else {
+                        "UNRATIFY - revoke every offer under this root"
+                    }
+                );
+            }
         }
         PayloadType::Cancel => {
             let (maker, root) = decode_cancel_root_calldata(&bytes).map_err(|e| e.to_string())?;
-            println!("Decoded cancelRoot(...) payload\n");
-            println!("  maker : {}", render::checksum(&maker));
-            println!("  root  : {}", render::hex_bytes(&root));
+            if json {
+                print_json(&render::cancel_json(&maker, &root));
+            } else {
+                println!("Decoded cancelRoot(...) payload\n");
+                println!("  maker : {}", render::checksum(&maker));
+                println!("  root  : {}", render::hex_bytes(&root));
+            }
         }
         PayloadType::MarketState => {
             let m = decode_market_state(&bytes).map_err(|e| e.to_string())?;
-            println!("Decoded marketState return\n");
-            print!("{}", render::market_state_text(&m));
+            if json {
+                print_json(&render::market_state_json(&m));
+            } else {
+                println!("Decoded marketState return\n");
+                print!("{}", render::market_state_text(&m));
+            }
         }
         PayloadType::Position => {
             let p = decode_position(&bytes).map_err(|e| e.to_string())?;
-            println!("Decoded position return\n");
-            print!("{}", render::position_text(&p));
+            if json {
+                print_json(&render::position_json(&p));
+            } else {
+                println!("Decoded position return\n");
+                print!("{}", render::position_text(&p));
+            }
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -692,7 +708,37 @@ fn cmd_digest(
     let domain = domain_separator(chain_id_word, &ratifier_addr);
     let digest = tree_digest(root, height, chain_id_word, &ratifier_addr);
 
+    // Parse assertions before the EIP-712 output branch so `--eip712` cannot silently bypass
+    // an explicit safety check. Successful EIP-712 output remains pure JSON; mismatches are
+    // reported on stderr and return failure without emitting a document.
+    let expected_digest = expect.map(parse_word).transpose()?;
+    let expected_root = expect_root.map(parse_word).transpose()?;
+
     if eip712 {
+        let mut ok = true;
+        if let Some(exp) = expected_digest {
+            if exp != digest {
+                eprintln!(
+                    "MISMATCH: --expect {} != {}",
+                    render::hex_bytes(&exp),
+                    render::hex_bytes(&digest)
+                );
+                ok = false;
+            }
+        }
+        if let Some(exp) = expected_root {
+            if exp != root {
+                eprintln!(
+                    "MISMATCH: --expect-root {} != {}",
+                    render::hex_bytes(&exp),
+                    render::hex_bytes(&root)
+                );
+                ok = false;
+            }
+        }
+        if !ok {
+            return Ok(ExitCode::FAILURE);
+        }
         let td = eip712::typed_data(&offers, chain_id_word, &ratifier_addr, height);
         print_json(&td);
         return Ok(ExitCode::SUCCESS);
@@ -713,8 +759,7 @@ fn cmd_digest(
     println!("  DIGEST (to sign)    : {}", render::hex_bytes(&digest));
 
     let mut code = ExitCode::SUCCESS;
-    if let Some(exp) = expect {
-        let exp_word = parse_word(exp)?;
+    if let Some(exp_word) = expected_digest {
         println!();
         if exp_word == digest {
             println!("MATCH: the wallet digest matches the intended terms.");
@@ -728,8 +773,7 @@ fn cmd_digest(
             code = ExitCode::FAILURE;
         }
     }
-    if let Some(exp) = expect_root {
-        let exp_word = parse_word(exp)?;
+    if let Some(exp_word) = expected_root {
         println!();
         if exp_word == root {
             println!("MATCH: the root commits to exactly these offers.");
