@@ -63,11 +63,14 @@ fn defaults_are_sane() {
         .ratifier(RATIFIER)
         .max_units(1)
         .build();
-    // Raw build() skips the side/tick enforcement: side defaults to buy, start to 0, expiry to
-    // max, no reduce_only/callback/receiver.
+    // Raw build() skips required-field enforcement: side defaults to buy and timestamps to zero.
     assert!(offer.buy);
     assert_eq!(word_to_u128(&offer.start), Some(0));
-    assert_eq!(word_to_u256(&offer.expiry), U256::MAX);
+    assert_eq!(word_to_u256(&offer.expiry), U256::ZERO);
+    assert_eq!(
+        word_to_u256(&offer.continuous_fee_cap),
+        U256::from(MAX_CONTINUOUS_FEE)
+    );
     assert!(!offer.reduce_only);
     assert!(offer.callback_data.is_empty());
     assert_eq!(offer.receiver_if_maker_is_seller, [0u8; 20]);
@@ -121,6 +124,7 @@ fn try_build_rejects_unset_side() {
     // Everything else is valid, so the defaulted side is the only complaint.
     let res = OfferBuilder::new(a_market(), [0x55; 20])
         .tick(8)
+        .expiry(2_000_000_000)
         .ratifier(RATIFIER)
         .max_units(1_000_000)
         .continuous_fee_cap(U256::from(100u64))
@@ -135,6 +139,7 @@ fn try_build_rejects_unset_tick() {
     // builder must flag it: its price rounds to zero.
     let res = OfferBuilder::new(a_market(), [0x55; 20])
         .buy()
+        .expiry(2_000_000_000)
         .ratifier(RATIFIER)
         .max_units(1_000_000)
         .continuous_fee_cap(U256::from(100u64))
@@ -149,6 +154,7 @@ fn try_build_accepts_tick_set_via_apr() {
     let res = OfferBuilder::new(a_market(), [0x55; 20])
         .lend()
         .apr(5.0, 1_700_000_000)
+        .expiry(2_000_000_000)
         .ratifier(RATIFIER)
         .max_units(1_000_000)
         .continuous_fee_cap(U256::from(100u64))
@@ -171,6 +177,29 @@ fn build_checked_rejects_unset_side_then_tick() {
         .max_units(1)
         .build_checked();
     assert_eq!(res.unwrap_err(), BuildError::TickNotSet);
+}
+
+#[test]
+fn checked_builder_requires_expiry_and_defaults_sell_receiver() {
+    let maker = [0x55; 20];
+    let err = OfferBuilder::new(a_market(), maker)
+        .buy()
+        .tick(8)
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .build_checked()
+        .unwrap_err();
+    assert_eq!(err, BuildError::ExpiryNotSet);
+
+    let sell = OfferBuilder::new(a_market(), maker)
+        .sell()
+        .tick(8)
+        .expiry(2_000_000_000)
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .build_checked()
+        .unwrap();
+    assert_eq!(sell.receiver_if_maker_is_seller, maker);
 }
 
 #[test]

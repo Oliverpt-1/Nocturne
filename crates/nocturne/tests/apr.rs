@@ -223,6 +223,7 @@ fn builder_lend_apr_assets_produces_valid_offer() {
     let offer = OfferBuilder::new(a_market(), [0x55; 20])
         .lend()
         .apr(5.0, NOW)
+        .expiry(MATURITY)
         .assets(target_assets, NOW, cbps)
         .ratifier(RATIFIER)
         .build_checked()
@@ -248,6 +249,7 @@ fn builder_borrow_side_sizes_seller() {
     let offer = OfferBuilder::new(a_market(), [0x55; 20])
         .borrow()
         .apr(8.0, NOW)
+        .expiry(MATURITY)
         .assets(2_000_000, NOW, cbps)
         .ratifier(RATIFIER)
         .build_checked()
@@ -265,6 +267,7 @@ fn builder_does_not_panic_on_extreme_apr() {
     let res = OfferBuilder::new(a_market(), [0x55; 20])
         .lend()
         .apr(1000.0, NOW)
+        .expiry(MATURITY)
         .assets(1_000_000, NOW, cbps)
         .ratifier(RATIFIER)
         .build_checked();
@@ -282,6 +285,7 @@ fn builder_surfaces_conversion_error_at_build_checked() {
     let res = OfferBuilder::new(a_market(), [0x55; 20])
         .lend()
         .tick(3372)
+        .expiry(MATURITY)
         .assets(u128::MAX, NOW, cbps)
         .ratifier(RATIFIER)
         .build_checked();

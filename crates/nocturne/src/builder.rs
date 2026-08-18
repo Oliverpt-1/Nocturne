@@ -8,7 +8,7 @@
 use crate::{
     apr_to_tick, buyer_assets_to_units, seller_assets_to_units, u256_to_word, validate_offer,
     word_from_u64, word_to_u256, Address, CollateralParams, Market, Offer, OfferError, SimError,
-    SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, U256,
+    SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, MAX_CONTINUOUS_FEE, U256,
 };
 
 /// A builder-usage error surfaced at [`build_checked`](OfferBuilder::build_checked) time: either a
@@ -32,6 +32,9 @@ pub enum BuildError {
     /// The tick was never set (via [`tick`](OfferBuilder::tick) or [`apr`](OfferBuilder::apr)).
     #[error("offer tick never set")]
     TickNotSet,
+    /// The required offer expiry was never set.
+    #[error("offer expiry never set")]
+    ExpiryNotSet,
 }
 
 /// Builder for a [`Market`]. Collateral params must be added in ascending token order (the only
@@ -122,8 +125,8 @@ impl MarketBuilder {
 
 /// Builder for an [`Offer`].
 ///
-/// Defaults: `start = 0`, `expiry = u256::MAX` (never expires until set), no callback,
-/// `reduce_only = false`, `continuous_fee_cap = 0`. You must set a side, a tick, a ratifier, and
+/// Defaults: `start = 0`, no callback, `reduce_only = false`, and
+/// `continuous_fee_cap = MAX_CONTINUOUS_FEE`. You must set a side, tick, expiry, ratifier, and
 /// exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets).
 /// [`try_build`](Self::try_build) and [`build_checked`](Self::build_checked) reject an offer whose
 /// side or tick was never set: relying on the defaults would sign a buy offer (in `take` the maker
@@ -142,12 +145,14 @@ pub struct OfferBuilder {
     maker: Address,
     start: U256,
     expiry: U256,
+    expiry_set: bool,
     tick: U256,
     tick_set: bool,
     group: Word,
     callback: Address,
     callback_data: Vec<u8>,
     receiver_if_maker_is_seller: Address,
+    receiver_set: bool,
     ratifier: Address,
     reduce_only: bool,
     max_units: u128,
@@ -165,18 +170,20 @@ impl OfferBuilder {
             side_set: false,
             maker,
             start: U256::ZERO,
-            expiry: U256::MAX,
+            expiry: U256::ZERO,
+            expiry_set: false,
             tick: U256::ZERO,
             tick_set: false,
             group: [0u8; 32],
             callback: [0u8; 20],
             callback_data: Vec::new(),
             receiver_if_maker_is_seller: [0u8; 20],
+            receiver_set: false,
             ratifier: [0u8; 20],
             reduce_only: false,
             max_units: 0,
             max_assets: 0,
-            continuous_fee_cap: U256::ZERO,
+            continuous_fee_cap: U256::from(MAX_CONTINUOUS_FEE),
             error: None,
         }
     }
@@ -192,6 +199,9 @@ impl OfferBuilder {
     pub fn side(mut self, buy: bool) -> Self {
         self.buy = buy;
         self.side_set = true;
+        if !self.receiver_set {
+            self.receiver_if_maker_is_seller = if buy { [0u8; 20] } else { self.maker };
+        }
         self
     }
 
@@ -231,6 +241,7 @@ impl OfferBuilder {
     /// Set the expiry time (unix seconds).
     pub fn expiry(mut self, unix_secs: u64) -> Self {
         self.expiry = U256::from(unix_secs);
+        self.expiry_set = true;
         self
     }
 
@@ -263,6 +274,7 @@ impl OfferBuilder {
     /// buy offers, must be nonzero for sell offers - `address(0)` would receive the proceeds).
     pub fn receiver_if_maker_is_seller(mut self, receiver: Address) -> Self {
         self.receiver_if_maker_is_seller = receiver;
+        self.receiver_set = true;
         self
     }
 
@@ -362,6 +374,9 @@ impl OfferBuilder {
         if !self.tick_set {
             return Err(BuildError::TickNotSet);
         }
+        if !self.expiry_set {
+            return Err(BuildError::ExpiryNotSet);
+        }
         Ok(self.build())
     }
 
@@ -402,6 +417,9 @@ impl OfferBuilder {
         }
         if !self.tick_set {
             errs.push(OfferError::TickNotSet);
+        }
+        if !self.expiry_set {
+            errs.push(OfferError::ExpiryNotSet);
         }
         let offer = self.build();
         errs.extend(validate_offer(&offer, ctx));

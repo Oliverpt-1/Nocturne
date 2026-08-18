@@ -25,6 +25,8 @@ pub const MAX_TICK: u64 = 6744;
 pub const MAX_COLLATERALS: usize = 128;
 /// Default tick spacing a market is created with (`DEFAULT_TICK_SPACING` in ConstantsLib.sol).
 pub const DEFAULT_TICK_SPACING: u8 = 4;
+/// Highest continuously compounded per-second fee accepted by the protocol.
+pub const MAX_CONTINUOUS_FEE: u64 = 317_097_919;
 /// `touchMarket` rejects a maturity more than 100 years out.
 pub const MAX_MATURITY_HORIZON_SECS: u64 = 100 * 365 * 24 * 60 * 60;
 
@@ -96,6 +98,8 @@ pub enum OfferError {
     /// rounds to 0 (the `PRICE_ROUNDING_STEP` snap in `TickLib.tickToPrice`), so the maker would
     /// give units away for zero assets.
     TickNotSet,
+    /// The builder's required expiry was never set.
+    ExpiryNotSet,
 }
 
 /// A snapshot of live market state, if the maker has one to validate against.
