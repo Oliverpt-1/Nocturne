@@ -219,7 +219,7 @@ pub fn canonical_market(market: &Market) -> Market {
     let mut canonical = market.clone();
     canonical
         .collateral_params
-        .sort_by(|left, right| left.token.cmp(&right.token));
+        .sort_by_key(|collateral| collateral.token);
     canonical
 }
 
@@ -227,7 +227,7 @@ pub fn hash_market(m: &Market) -> Word {
     // collateralParamsHash = keccak256(abi.encodePacked(hashes))
     let mut packed = Vec::with_capacity(m.collateral_params.len() * 32);
     let mut collateral_params: Vec<&CollateralParams> = m.collateral_params.iter().collect();
-    collateral_params.sort_by(|left, right| left.token.cmp(&right.token));
+    collateral_params.sort_by_key(|collateral| collateral.token);
     for cp in collateral_params {
         packed.extend_from_slice(&hash_collateral_params(cp));
     }
@@ -363,13 +363,13 @@ impl OfferGroup {
 /// One entry in a canonical offer tree: either a standalone offer or an explicit shared group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OfferTreeEntry {
-    Offer(Offer),
+    Offer(Box<Offer>),
     Group(OfferGroup),
 }
 
 impl From<Offer> for OfferTreeEntry {
     fn from(offer: Offer) -> Self {
-        Self::Offer(offer)
+        Self::Offer(Box::new(offer))
     }
 }
 
@@ -467,7 +467,7 @@ impl OfferTree {
         for entry in entries {
             match entry.into() {
                 OfferTreeEntry::Offer(offer) => {
-                    offers.extend(OfferGroup::create(vec![offer])?.offers);
+                    offers.extend(OfferGroup::create(vec![*offer])?.offers);
                 }
                 OfferTreeEntry::Group(group) => {
                     offers.extend(OfferGroup::create(group.offers)?.offers);
