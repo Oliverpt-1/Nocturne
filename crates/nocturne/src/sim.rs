@@ -111,6 +111,30 @@ pub fn tick_to_price(tick: u64) -> Result<U256, SimError> {
     Ok(div_half_down(p, step) * step)
 }
 
+/// Convert a tick to its exact WAD-scaled fixed period rate, rounded up.
+///
+/// This is `ceil(WAD² / price) - WAD`. Use [`tick_to_apr_wad`] to annualize it without
+/// floating-point conversion.
+pub fn tick_to_rate(tick: u64) -> Result<U256, SimError> {
+    let price = tick_to_price(tick)?;
+    if price.is_zero() {
+        return Err(SimError::ZeroPrice);
+    }
+    Ok(mul_div_up(wad(), wad(), price) - wad())
+}
+
+/// Exact WAD-scaled simple APR for a tick and time to maturity, rounded up.
+pub fn tick_to_apr_wad(tick: u64, ttm_secs: u64) -> Result<U256, SimError> {
+    if ttm_secs == 0 {
+        return Err(SimError::ZeroTimeToMaturity);
+    }
+    Ok(mul_div_up(
+        tick_to_rate(tick)?,
+        U256::from(SECONDS_PER_YEAR),
+        U256::from(ttm_secs),
+    ))
+}
+
 /// `TickLib.priceToTick` - among the ticks that are multiples of `spacing`, the lowest one whose
 /// price is greater than or equal to `price`.
 ///
@@ -153,17 +177,8 @@ pub fn price_to_tick(price: U256, spacing: u64) -> Result<u64, SimError> {
 /// Because price increases with tick, APR **decreases** with tick. Errors on `ttm_secs == 0`
 /// ([`SimError::ZeroTimeToMaturity`]) or a zero price ([`SimError::ZeroPrice`]).
 pub fn tick_to_apr(tick: u64, ttm_secs: u64) -> Result<f64, SimError> {
-    if ttm_secs == 0 {
-        return Err(SimError::ZeroTimeToMaturity);
-    }
-    let price = tick_to_price(tick)?;
-    if price.is_zero() {
-        return Err(SimError::ZeroPrice);
-    }
-    let price_frac = u128::try_from(price).expect("price <= 1e18 fits in u128") as f64 / 1e18;
-    let term_rate = 1.0 / price_frac - 1.0;
-    let apr_pct = term_rate * (SECONDS_PER_YEAR as f64 / ttm_secs as f64) * 100.0;
-    Ok(apr_pct)
+    let apr_wad = tick_to_apr_wad(tick, ttm_secs)?;
+    Ok(u128::try_from(apr_wad).unwrap_or(u128::MAX) as f64 / 1e16)
 }
 
 /// Inverse of [`tick_to_apr`]: the lowest **accessible** tick that yields at most `apr_pct`.

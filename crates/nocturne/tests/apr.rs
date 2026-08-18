@@ -58,6 +58,47 @@ fn price_to_tick_matches_contract_exactly() {
 }
 
 #[test]
+fn exact_rate_outputs_match_sdk_vectors() {
+    let cases = [
+        (
+            4,
+            9_999_999_000_000_000_000_000_000u128,
+            121_666_654_500_000_000_000_000_000u128,
+        ),
+        (
+            1_000,
+            136_985_301_369_863_013_698_631,
+            1_666_654_500_000_000_000_000_011,
+        ),
+        (
+            2_000,
+            937_174_312_787_315_883_292,
+            11_402_287_472_245_676_580_053,
+        ),
+        (3_372, 1_000_000_000_000_000_000, 12_166_666_666_666_666_667),
+        (5_000, 297_588_532_588_446, 3_620_660_479_826_093),
+        (6_740, 100_000_010_001, 1_216_666_788_346),
+        (6_744, 0, 0),
+    ];
+    for (tick, rate, apr_30d) in cases {
+        assert_eq!(tick_to_rate(tick).unwrap(), U256::from(rate), "tick {tick}");
+        assert_eq!(
+            tick_to_apr_wad(tick, 2_592_000).unwrap(),
+            U256::from(apr_30d),
+            "tick {tick}"
+        );
+        assert_eq!(
+            tick_to_apr_wad(tick, SECONDS_PER_YEAR).unwrap(),
+            U256::from(rate),
+            "one-year tick {tick}"
+        );
+    }
+
+    assert_eq!(tick_to_rate(0), Err(SimError::ZeroPrice));
+    assert_eq!(tick_to_apr_wad(3_372, 0), Err(SimError::ZeroTimeToMaturity));
+}
+
+#[test]
 fn apr_chain_matches_contract_exactly() {
     for &(apr, ttm, tick, tick_price) in APR_CHAIN {
         let t = apr_to_tick(apr, ttm, SPACING).unwrap();
