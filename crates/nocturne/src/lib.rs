@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use k256::ecdsa::{RecoveryId, Signature as EcdsaSig, SigningKey, VerifyingKey};
+use std::collections::HashSet;
 use tiny_keccak::{Hasher, Keccak};
 
 mod convert;
@@ -40,6 +41,38 @@ pub enum TreeError {
     /// on-chain with `TreeTooHigh`.
     #[error("tree height must be at most 20, got {0}")]
     TooHigh(usize),
+}
+
+/// Errors from constructing a canonical offer consumption group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum GroupError {
+    #[error("offer group must not be empty")]
+    Empty,
+    #[error("all offers in a group must use the same maker")]
+    MakerMismatch,
+    #[error("all offers in a group must use the same maker side")]
+    SideMismatch,
+    #[error("all offers in a group must use the same loan token")]
+    LoanTokenMismatch,
+    #[error("every grouped offer must set exactly one non-zero cap")]
+    InvalidCap,
+    #[error("all offers in a group must use the same cap mode and value")]
+    CapMismatch,
+    #[error("buy offers must use the zero maker-seller receiver")]
+    BuyReceiverNotZero,
+}
+
+/// Errors from the high-level grouped and padded offer-tree constructor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum OfferTreeError {
+    #[error(transparent)]
+    Group(#[from] GroupError),
+    #[error(transparent)]
+    Tree(#[from] TreeError),
+    #[error("offer tree must not be empty")]
+    Empty,
+    #[error("offer tree contains a duplicate offer hash")]
+    DuplicateOffer,
 }
 
 pub type Word = [u8; 32];
@@ -259,6 +292,123 @@ pub fn hash_offer(o: &Offer) -> Word {
     ]))
 }
 
+/// Hash offers with `group = 0`, sort those hashes, and hash their concatenation.
+///
+/// This is the deterministic consumption-group id used by the maker-side router.
+pub fn offer_group_id(offers: &[Offer]) -> Result<Word, GroupError> {
+    if offers.is_empty() {
+        return Err(GroupError::Empty);
+    }
+    let mut hashes: Vec<Word> = offers
+        .iter()
+        .map(|offer| {
+            let mut zero_group = offer.clone();
+            zero_group.group = [0u8; 32];
+            hash_offer(&zero_group)
+        })
+        .collect();
+    hashes.sort_unstable();
+    let mut packed = Vec::with_capacity(hashes.len() * 32);
+    for hash in hashes {
+        packed.extend_from_slice(&hash);
+    }
+    Ok(keccak(&packed))
+}
+
+/// A validated set of offers sharing one content-addressed consumption group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferGroup {
+    pub id: Word,
+    pub offers: Vec<Offer>,
+}
+
+impl OfferGroup {
+    pub fn create(mut offers: Vec<Offer>) -> Result<Self, GroupError> {
+        let first = offers.first().ok_or(GroupError::Empty)?;
+        let maker = first.maker;
+        let buy = first.buy;
+        let loan_token = first.market.loan_token;
+        let max_units = first.max_units;
+        let max_assets = first.max_assets;
+
+        for offer in &offers {
+            if offer.maker != maker {
+                return Err(GroupError::MakerMismatch);
+            }
+            if offer.buy != buy {
+                return Err(GroupError::SideMismatch);
+            }
+            if offer.market.loan_token != loan_token {
+                return Err(GroupError::LoanTokenMismatch);
+            }
+            if (offer.max_units == 0) == (offer.max_assets == 0) {
+                return Err(GroupError::InvalidCap);
+            }
+            if offer.max_units != max_units || offer.max_assets != max_assets {
+                return Err(GroupError::CapMismatch);
+            }
+            if offer.buy && offer.receiver_if_maker_is_seller != [0u8; 20] {
+                return Err(GroupError::BuyReceiverNotZero);
+            }
+        }
+
+        let id = offer_group_id(&offers)?;
+        for offer in &mut offers {
+            offer.group = id;
+        }
+        Ok(Self { id, offers })
+    }
+}
+
+/// One entry in a canonical offer tree: either a standalone offer or an explicit shared group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OfferTreeEntry {
+    Offer(Offer),
+    Group(OfferGroup),
+}
+
+impl From<Offer> for OfferTreeEntry {
+    fn from(offer: Offer) -> Self {
+        Self::Offer(offer)
+    }
+}
+
+impl From<OfferGroup> for OfferTreeEntry {
+    fn from(group: OfferGroup) -> Self {
+        Self::Group(group)
+    }
+}
+
+/// The protocol-zero offer used to pad non-power-of-two Merkle trees.
+pub fn empty_offer() -> Offer {
+    Offer {
+        market: Market {
+            chain_id: [0; 32],
+            midnight: [0; 20],
+            loan_token: [0; 20],
+            collateral_params: Vec::new(),
+            maturity: [0; 32],
+            rcf_threshold: [0; 32],
+            enter_gate: [0; 20],
+            liquidator_gate: [0; 20],
+        },
+        buy: false,
+        maker: [0; 20],
+        start: [0; 32],
+        expiry: [0; 32],
+        tick: [0; 32],
+        group: [0; 32],
+        callback: [0; 20],
+        callback_data: Vec::new(),
+        receiver_if_maker_is_seller: [0; 20],
+        ratifier: [0; 20],
+        reduce_only: false,
+        max_units: 0,
+        max_assets: 0,
+        continuous_fee_cap: [0; 32],
+    }
+}
+
 #[inline]
 pub fn hash_node(left: &Word, right: &Word) -> Word {
     let mut buf = [0u8; 64];
@@ -272,6 +422,13 @@ pub fn hash_node(left: &Word, right: &Word) -> Word {
 pub struct OfferTree {
     /// `levels[0]` = leaves, `levels[height]` = `[root]`
     pub levels: Vec<Vec<Word>>,
+}
+
+/// A canonical tree plus the final offers in leaf order, including zero padding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferTreeDescriptor {
+    pub offers: Vec<Offer>,
+    pub tree: OfferTree,
 }
 
 impl OfferTree {
@@ -295,6 +452,43 @@ impl OfferTree {
             levels.push(next);
         }
         Ok(OfferTree { levels })
+    }
+
+    /// Assign canonical group ids, append protocol-zero padding, and build the Merkle tree.
+    ///
+    /// Standalone offers each receive their own content-addressed group. Explicit
+    /// [`OfferGroup`] entries retain their shared group id.
+    pub fn from_entries<I, E>(entries: I) -> Result<OfferTreeDescriptor, OfferTreeError>
+    where
+        I: IntoIterator<Item = E>,
+        E: Into<OfferTreeEntry>,
+    {
+        let mut offers = Vec::new();
+        for entry in entries {
+            match entry.into() {
+                OfferTreeEntry::Offer(offer) => {
+                    offers.extend(OfferGroup::create(vec![offer])?.offers);
+                }
+                OfferTreeEntry::Group(group) => {
+                    offers.extend(OfferGroup::create(group.offers)?.offers);
+                }
+            }
+        }
+        if offers.is_empty() {
+            return Err(OfferTreeError::Empty);
+        }
+
+        let mut seen = HashSet::with_capacity(offers.len());
+        for offer in &offers {
+            if !seen.insert(hash_offer(offer)) {
+                return Err(OfferTreeError::DuplicateOffer);
+            }
+        }
+
+        let padded_len = offers.len().next_power_of_two();
+        offers.resize_with(padded_len, empty_offer);
+        let tree = Self::build(offers.iter().map(hash_offer).collect())?;
+        Ok(OfferTreeDescriptor { offers, tree })
     }
 
     pub fn height(&self) -> usize {
