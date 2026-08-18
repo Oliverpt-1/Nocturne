@@ -178,10 +178,24 @@ pub fn hash_collateral_params(cp: &CollateralParams) -> Word {
     ]))
 }
 
+/// Return a market with collateral parameters in canonical ascending token order.
+///
+/// Midnight identifies and hashes markets independently of the caller's input order. Keeping
+/// this normalization explicit is also useful before ABI encoding or persistence.
+pub fn canonical_market(market: &Market) -> Market {
+    let mut canonical = market.clone();
+    canonical
+        .collateral_params
+        .sort_by(|left, right| left.token.cmp(&right.token));
+    canonical
+}
+
 pub fn hash_market(m: &Market) -> Word {
     // collateralParamsHash = keccak256(abi.encodePacked(hashes))
     let mut packed = Vec::with_capacity(m.collateral_params.len() * 32);
-    for cp in &m.collateral_params {
+    let mut collateral_params: Vec<&CollateralParams> = m.collateral_params.iter().collect();
+    collateral_params.sort_by(|left, right| left.token.cmp(&right.token));
+    for cp in collateral_params {
         packed.extend_from_slice(&hash_collateral_params(cp));
     }
     let cp_hash = keccak(&packed);
@@ -196,6 +210,31 @@ pub fn hash_market(m: &Market) -> Word {
         addr_word(&m.enter_gate),
         addr_word(&m.liquidator_gate),
     ]))
+}
+
+/// Compute the deterministic Midnight market id (`IdLib.toId`).
+///
+/// The id is the CREATE2 address word for the SSTORE2 pointer that contains the canonical ABI
+/// encoding of the market parameters. It is returned as the protocol's 32-byte market id rather
+/// than truncated to an Ethereum address.
+pub fn market_id(market: &Market) -> Word {
+    const SSTORE2_PREFIX: [u8; 11] = [
+        0x60, 0x0b, 0x38, 0x03, 0x80, 0x60, 0x0b, 0x5f, 0x39, 0x5f, 0xf3,
+    ];
+
+    let canonical = canonical_market(market);
+    let encoded = encode_market_params(&canonical);
+    let mut init_code = Vec::with_capacity(SSTORE2_PREFIX.len() + encoded.len());
+    init_code.extend_from_slice(&SSTORE2_PREFIX);
+    init_code.extend_from_slice(&encoded);
+    let creation_hash = keccak(&init_code);
+
+    let mut create2 = Vec::with_capacity(1 + 20 + 32 + 32);
+    create2.push(0xff);
+    create2.extend_from_slice(&canonical.midnight);
+    create2.extend_from_slice(&[0u8; 32]);
+    create2.extend_from_slice(&creation_hash);
+    keccak(&create2)
 }
 
 /// EIP-712 struct hash of an Offer - this is the Merkle leaf. Mirrors `HashLib.hashOffer`.

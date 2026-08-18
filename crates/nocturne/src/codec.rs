@@ -191,6 +191,15 @@ fn offer_value(o: &Offer) -> Value {
 
 // ---- public encoders ----
 
+/// Standard ABI encoding of a single `Market` tuple.
+///
+/// This is the payload stored by Midnight's SSTORE2 market-params pointer. The collateral order
+/// is preserved; callers that need the canonical protocol representation should pass a
+/// [`canonical_market`](crate::canonical_market).
+pub fn encode_market_params(market: &crate::Market) -> Vec<u8> {
+    encode_sequence(&[market_value(market)])
+}
+
 /// `abi.encode(Signature{uint8 v, bytes32 r, bytes32 s}, bytes32 root, uint256 leafIndex,
 /// bytes32[] proof)` - the `ratifierData` consumed by `EcrecoverRatifier.isRatified`.
 ///
