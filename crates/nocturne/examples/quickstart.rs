@@ -29,12 +29,14 @@ fn main() {
         .build_checked()
         .expect("valid offer");
 
-    // hash into a one-leaf tree, sign the root, verify it will ratify on-chain
-    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    // assign the offer's content-addressed group, build its tree, and sign the root
+    let descriptor = OfferTree::from_entries([offer]).unwrap();
+    let offer = &descriptor.offers[0];
+    let tree = descriptor.tree;
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
     let ok = verify(
-        &offer,
+        offer,
         &tree.root(),
         0,
         &tree.proof(0),

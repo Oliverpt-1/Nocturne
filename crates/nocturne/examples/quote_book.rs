@@ -24,7 +24,7 @@ fn market() -> Market {
         .build()
 }
 
-/// Lend offers laddered up from `fair_apr`, one group per rung so each cancels independently.
+/// Lend offers laddered up from `fair_apr`; the tree assigns one group per standalone rung.
 fn ladder(maker: Address, ratifier: Address, fair_apr: f64) -> Vec<Offer> {
     (0..RUNGS)
         .map(|i| {
@@ -32,7 +32,6 @@ fn ladder(maker: Address, ratifier: Address, fair_apr: f64) -> Vec<Offer> {
                 .lend()
                 .apr(fair_apr + APR_STEP * i as f64, NOW)
                 .expiry(MATURITY)
-                .group_u64(i)
                 .ratifier(ratifier)
                 .max_units(MAX_UNITS)
                 .build_checked()
@@ -44,14 +43,16 @@ fn ladder(maker: Address, ratifier: Address, fair_apr: f64) -> Vec<Offer> {
 /// Hash the book into one tree and sign its root - one signature covers every offer.
 fn sign_book(
     signer: &LocalSigner,
-    offers: &[Offer],
+    offers: Vec<Offer>,
     chain_id: Word,
     ratifier: &Address,
-) -> (OfferTree, Sig) {
-    let tree = OfferTree::build(offers.iter().map(hash_offer).collect()).unwrap();
+) -> (Vec<Offer>, OfferTree, Sig) {
+    let descriptor = OfferTree::from_entries(offers).unwrap();
+    let offers = descriptor.offers;
+    let tree = descriptor.tree;
     let digest = tree_digest(tree.root(), tree.height(), chain_id, ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
-    (tree, sig)
+    (offers, tree, sig)
 }
 
 fn main() {
@@ -63,7 +64,7 @@ fn main() {
 
     // Quote the book at fair value 7%.
     let offers = ladder(maker, ratifier, 7.0);
-    let (tree, sig) = sign_book(&signer, &offers, chain_id, &ratifier);
+    let (offers, tree, sig) = sign_book(&signer, offers, chain_id, &ratifier);
     for (i, offer) in offers.iter().enumerate() {
         let tick = word_to_u128(&offer.tick).unwrap() as u64;
         println!(
@@ -93,7 +94,7 @@ fn main() {
     );
 
     let offers = ladder(maker, ratifier, 7.5);
-    let (tree, _sig) = sign_book(&signer, &offers, chain_id, &ratifier);
+    let (_offers, tree, _sig) = sign_book(&signer, offers, chain_id, &ratifier);
     println!("new root 0x{}", hex(&tree.root()));
 }
 

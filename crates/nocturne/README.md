@@ -46,12 +46,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_units(1_000_000)
         .build_checked()?;
 
-    let tree = OfferTree::build(vec![hash_offer(&offer)])?;
+    let descriptor = OfferTree::from_entries([offer])?;
+    let offer = &descriptor.offers[0];
+    let tree = descriptor.tree;
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let signature = signer.sign_digest(&digest)?;
 
     assert!(verify(
-        &offer,
+        offer,
         &tree.root(),
         0,
         &tree.proof(0),
@@ -72,7 +74,7 @@ version from the workspace with `cargo run -p nocturne --example quickstart`.
 
 | Goal | Main APIs | Example |
 |---|---|---|
-| Quote and sign an offer book | `OfferBuilder`, `OfferTree`, `tree_digest`, `Signer` | [`quote_book.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/quote_book.rs) |
+| Quote and sign an offer book | `OfferBuilder`, `OfferGroup`, `OfferTree`, `tree_digest`, `Signer` | [`quote_book.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/quote_book.rs) |
 | Validate, size, and simulate a take | `validate_offer`, `seller_assets_to_units`, `simulate_take` | [`take_offer.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/take_offer.rs) |
 | Encode a transaction | `encode_ratifier_data`, `encode_take_calldata`, `encode_bundle_calldata` | [`take_offer.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/take_offer.rs) |
 | Decode calldata and contract state | `decode_bundle_calldata`, `decode_market_state`, `decode_position` | [`read_state.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/read_state.rs) |
