@@ -41,6 +41,9 @@ pub enum SizingError {
     /// the corresponding `mulDiv` by a zero denominator reverts; guarded here to avoid a panic.
     #[error("price is zero; units are unbounded")]
     ZeroPrice,
+    /// Midnight requires exactly one non-zero consumption cap.
+    #[error("offer must set exactly one non-zero max-units or max-assets cap")]
+    InvalidCap,
 }
 
 #[inline]
@@ -168,5 +171,43 @@ pub fn consumable_units(
         buyer_assets_to_units(offer, remaining_assets, now, cbps)
     } else {
         seller_assets_to_units(offer, remaining_assets, now, cbps)
+    }
+}
+
+/// Largest unit amount that can safely be taken without exceeding the offer's remaining cap.
+///
+/// This is the maker/API-facing calculation: unlike [`consumable_units`], which mirrors the
+/// Solidity periphery conversion helper, an assets-capped buy returns the greatest unit count
+/// whose floor-rounded buyer assets stay within the cap. It also applies the hydrated market's
+/// current continuous fee before reporting any capacity.
+pub fn get_consumable_units(
+    offer: &Offer,
+    consumed: u128,
+    now: u64,
+    cbps: [u16; 7],
+    market_continuous_fee: U256,
+) -> Result<U256, SizingError> {
+    if (offer.max_units == 0) == (offer.max_assets == 0) {
+        return Err(SizingError::InvalidCap);
+    }
+    if word_to_u256(&offer.continuous_fee_cap) < market_continuous_fee {
+        return Ok(U256::ZERO);
+    }
+    if offer.max_units > 0 {
+        return Ok(U256::from(zero_floor_sub_u128(offer.max_units, consumed)));
+    }
+
+    let remaining_assets = U256::from(zero_floor_sub_u128(offer.max_assets, consumed));
+    let (seller_price, buyer_price) = prices(offer, now, cbps)?;
+    if offer.buy {
+        if buyer_price.is_zero() {
+            return Ok(U256::MAX);
+        }
+        Ok(((remaining_assets + U256::from(1u64)) * wad() - U256::from(1u64)) / buyer_price)
+    } else {
+        if seller_price.is_zero() {
+            return Ok(U256::MAX);
+        }
+        Ok(mul_div_down(remaining_assets, wad(), seller_price))
     }
 }

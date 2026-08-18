@@ -115,6 +115,47 @@ fn consumable_units_match_contract() {
     );
 }
 
+#[test]
+fn sdk_consumable_units_match_market_quote_vectors() {
+    let now = 1_900_000_000;
+    let cbps = [1, 2, 3, 4, 5, 6, 7];
+    let market_fee = U256::from(200_000_000u64);
+    let mut buy = offer(true, 3_000, 0, 1_000_000);
+    buy.market.maturity = word_from_u64(2_000_000_000);
+    buy.continuous_fee_cap = word_from_u64(300_000_000);
+
+    assert_eq!(
+        get_consumable_units(&buy, 0, now, cbps, market_fee).unwrap(),
+        U256::from(7_393_236u64)
+    );
+    assert_eq!(
+        get_consumable_units(&buy, 500_000, now, cbps, market_fee).unwrap(),
+        U256::from(3_696_621u64)
+    );
+
+    let mut sell = buy.clone();
+    sell.buy = false;
+    sell.receiver_if_maker_is_seller = sell.maker;
+    assert_eq!(
+        get_consumable_units(&sell, 500_000, now, cbps, market_fee).unwrap(),
+        U256::from(3_696_614u64)
+    );
+
+    let mut units = buy.clone();
+    units.max_units = 777_777;
+    units.max_assets = 0;
+    assert_eq!(
+        get_consumable_units(&units, 123_456, now, cbps, market_fee).unwrap(),
+        U256::from(654_321u64)
+    );
+
+    buy.continuous_fee_cap = word_from_u64(199_999_999);
+    assert_eq!(
+        get_consumable_units(&buy, 0, now, cbps, market_fee).unwrap(),
+        U256::ZERO
+    );
+}
+
 // ---------------------------------------------------------------------------
 // consumable_units: consumption arithmetic (zeroFloorSub, no underflow)
 // ---------------------------------------------------------------------------
