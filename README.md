@@ -29,26 +29,21 @@ mempool payloads, and produces transactions that Rust wallet clients can submit.
 Nocturne is an early v0.1.0 release and has not been independently security-audited. See
 [SECURITY.md](SECURITY.md) before using it with real value.
 
-## For Integrators
+## For Developers
 
-The SDK package is `nocturne-midnight` and is imported in Rust as `nocturne`:
+Add the SDK to your Rust project:
 
 ```toml
 [dependencies]
 nocturne = { package = "nocturne-midnight", version = "0.1.0" }
 ```
 
-Start with the [SDK guide](crates/nocturne/README.md) for a copy-paste quickstart, publication flow,
-and common workflows. The [examples](crates/nocturne/examples) are runnable with Cargo, and the
-[API documentation](https://docs.rs/nocturne-midnight) covers the complete public surface.
+See the [SDK guide](crates/nocturne/README.md) for the quickstart and publication flow, or browse
+the [examples](crates/nocturne/examples) and [API documentation](https://docs.rs/nocturne-midnight).
+The repository also includes the optional [`nocturne-verify`](crates/nocturne-verify/README.md)
+CLI for inspecting existing payloads.
 
-`nocturne-verify` is a separate CLI for inspecting an existing payload or typed-data request
-without creating or submitting transactions. Its [verifier guide](crates/nocturne-verify/README.md)
-contains installation and usage instructions.
-
-## For Developers
-
-The minimum supported Rust version is 1.90. Run the local test suite with:
+The minimum supported Rust version is 1.90. To test the repository:
 
 ```sh
 cargo test --workspace --all-targets
