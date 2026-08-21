@@ -34,6 +34,9 @@ pub use sizing::*;
 mod payload;
 pub use payload::*;
 
+mod submission;
+pub use submission::*;
+
 /// Errors from constructing a Merkle tree over offer leaves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TreeError {
