@@ -797,6 +797,24 @@ fn verify_typed_checks_leaves_against_intended_offers() {
     );
 }
 
+#[test]
+fn verify_typed_accepts_multi_maker_trees() {
+    // EcrecoverRatifier accepts a signer authorized by each offer's maker. The makers in one
+    // tree therefore need not be identical; authorization is checked when the tree is used.
+    let mut offers = [offer_for([0x42; 20]), offer_for([0x43; 20])];
+    offers[1].tick = word_from_u64(3376);
+    let td = serde_json::to_string(&nocturne_typed_data(&offers)).unwrap();
+    let path = write_temp("typed_multi_maker.json", &td);
+
+    let (stdout, _err, code) = run(&["verify-typed", &path]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(
+        stdout.contains("[PASS] document is the canonical encoding of the offers shown"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("RESULT: PASS"), "{stdout}");
+}
+
 /// Emit typed data through the binary (digest --eip712) so the test exercises the same
 /// document shape the tool itself produces.
 fn nocturne_typed_data(offers: &[Offer; 2]) -> serde_json::Value {

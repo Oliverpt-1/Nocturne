@@ -627,12 +627,6 @@ fn cmd_verify_typed(
         real.iter().all(|o| o.market.chain_id == parsed.chain_id),
         "every offer's market.chainId equals the domain chain id",
     );
-    check(
-        &mut ok,
-        real.windows(2).all(|w| w[0].maker == w[1].maker),
-        "every offer shares one maker (the signer)",
-    );
-
     // Optional: assert the real leaves are exactly the maker's intended offers, in order.
     if !offer_paths.is_empty() {
         let intended = load_offers(offer_paths)?;
