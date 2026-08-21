@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml"><img src="https://github.com/Oliverpt-1/midnight-rust/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Oliverpt-1/Nocturne/actions/workflows/ci.yml"><img src="https://github.com/Oliverpt-1/Nocturne/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0"></a>
   <a href="https://t.me/+tc58eLgH-dU1ZTJh"><img src="https://img.shields.io/badge/Telegram-chat-2CA5E0?logo=telegram&logoColor=white" alt="Telegram Chat"></a>
 </p>
@@ -39,22 +39,28 @@ deployment, but it has **not** been independently security-audited. Verify again
 ## Getting help
 
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
-- Open a [GitHub issue](https://github.com/Oliverpt-1/midnight-rust/issues) for bugs and features.
+- Open a [GitHub issue](https://github.com/Oliverpt-1/Nocturne/issues) for bugs and features.
 
-## Rust SDK
+## Choose what you need
 
-See the [`nocturne` crate README](crates/nocturne/README.md) for installation, a copy-paste
-quickstart, common workflows, and runnable examples. The complete API is available on
-[docs.rs/nocturne](https://docs.rs/nocturne).
+Nocturne has one Rust library and one CLI built on that library:
 
-## Verifying payloads
+| Goal | Use |
+|---|---|
+| Build, sign, simulate, or encode Midnight integrations | [`nocturne-midnight`](crates/nocturne/README.md), imported in Rust as `nocturne` |
+| Inspect and independently verify an existing payload | [`nocturne-verify`](crates/nocturne-verify/README.md) |
 
-A Midnight offer is a deep, opaque payload. The [`nocturne-verify`](crates/nocturne-verify/) CLI
-decodes that payload into readable terms and, entirely offline, reproduces the Merkle root and
-EIP-712 digest so a signer can confirm what they are about to sign.
+Add the SDK to a Rust project:
+
+```toml
+[dependencies]
+nocturne = { package = "nocturne-midnight", version = "0.1.0" }
+```
+
+Install the optional verifier CLI when you need to review opaque calldata or typed data:
 
 ```sh
-cargo install --path crates/nocturne-verify
+cargo install nocturne-verify
 
 nocturne-verify decode 0x6a14c9ef...                    # opaque calldata -> readable terms
 nocturne-verify verify 0x6a14c9ef... --chain-id 31337   # reproduce the root, check the signature
@@ -62,8 +68,8 @@ nocturne-verify digest offer.json  --chain-id 31337 \
     --expect 0xWalletDigest                             # cross-check the wallet digest vs your terms
 ```
 
-See the [`nocturne-verify` README](crates/nocturne-verify/README.md) for the full workflow and the
-independence caveat (why the `digest` cross-check is the stronger check).
+The [SDK guide](crates/nocturne/README.md) contains the copy-paste quickstart and runnable examples.
+The [verifier guide](crates/nocturne-verify/README.md) explains its full offline review workflow.
 
 ## Security
 

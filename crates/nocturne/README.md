@@ -14,7 +14,7 @@ Add the crate:
 
 ```toml
 [dependencies]
-nocturne = "0.1.0"
+nocturne = { package = "nocturne-midnight", version = "0.1.0" }
 ```
 
 Build a lend offer, sign its one-leaf tree, and verify the result locally:
@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 This example uses dummy keys and addresses and does not touch a network. Run its executable
-version from the workspace with `cargo run -p nocturne --example quickstart`.
+version from the workspace with `cargo run -p nocturne-midnight --example quickstart`.
 
 ## Common workflows
 
@@ -82,7 +82,7 @@ version from the workspace with `cargo run -p nocturne --example quickstart`.
 
 See the [examples index](https://github.com/Oliverpt-1/Nocturne/tree/main/crates/nocturne/examples)
 for runnable commands and the
-[API documentation](https://docs.rs/nocturne) for every public type and function. The
+[API documentation](https://docs.rs/nocturne-midnight) for every public type and function. The
 [live Anvil harness](https://github.com/Oliverpt-1/Nocturne/tree/main/crates/nocturne/e2e)
 exercises the complete lifecycle against the real Midnight contracts.
 

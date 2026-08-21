@@ -19,7 +19,8 @@ parity-checked against the Midnight contracts and real production payloads. Exit
 PASS, `1` FAIL, `2` PARTIAL (see `verify`).
 
 ```sh
-cargo install --path crates/nocturne-verify   # or: cargo run -p nocturne-verify -- <cmd>
+cargo install nocturne-verify
+# From a source checkout: cargo run -p nocturne-verify -- <cmd>
 ```
 
 Prebuilt binaries are on each [GitHub release](https://github.com/Oliverpt-1/Nocturne/releases).

@@ -14,11 +14,11 @@ Nothing submits a transaction.
 Run one from the workspace root:
 
 ```sh
-cargo run -p nocturne --example quickstart
-cargo run -p nocturne --example quote_book
-cargo run -p nocturne --example take_offer
-cargo run -p nocturne --example read_state
-cargo run -p nocturne --release --example bench
+cargo run -p nocturne-midnight --example quickstart
+cargo run -p nocturne-midnight --example quote_book
+cargo run -p nocturne-midnight --example take_offer
+cargo run -p nocturne-midnight --example read_state
+cargo run -p nocturne-midnight --release --example bench
 ```
 
 The [crate README](../README.md) owns the getting-started guide so the same content appears on

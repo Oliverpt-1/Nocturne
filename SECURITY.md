@@ -7,7 +7,7 @@ any correctness or signing issue as potentially security-relevant.
 
 **Do not open a public issue for security problems.** Instead, report privately:
 
-- Use GitHub's **[Report a vulnerability](https://github.com/Oliverpt-1/midnight-rust/security/advisories/new)**
+- Use GitHub's **[Report a vulnerability](https://github.com/Oliverpt-1/Nocturne/security/advisories/new)**
   (Security → Advisories), or
 - email **oliverptipton@gmail.com** with details and, if possible, a reproduction.
 
