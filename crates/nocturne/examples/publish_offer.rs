@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &ratifier,
     );
     let signature = maker_signer.sign_digest(&digest)?;
-    let ratifier_data = encode_ratifier_data(&signature, &tree.root(), 0, &tree.proof(0));
+    let ratifier_data = encode_ratifier_data(&signature, &tree.root(), 0, &tree.proof(0).unwrap());
     let payload = Payload::encode(&[PayloadItem {
         offer,
         ratifier_data,

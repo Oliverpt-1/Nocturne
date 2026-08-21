@@ -50,6 +50,9 @@ pub enum TreeError {
     /// on-chain with `TreeTooHigh`.
     #[error("tree height must be at most 20, got {0}")]
     TooHigh(usize),
+    /// The requested leaf is outside the tree's leaf layer.
+    #[error("leaf index {index} is out of range for {leaves} leaves")]
+    LeafIndexOutOfRange { index: usize, leaves: usize },
 }
 
 /// Errors from constructing a canonical offer consumption group.
@@ -63,6 +66,10 @@ pub enum GroupError {
     SideMismatch,
     #[error("all offers in a group must use the same loan token")]
     LoanTokenMismatch,
+    #[error("all offers in a group must use the same chain id")]
+    ChainIdMismatch,
+    #[error("all offers in a group must use the same Midnight contract")]
+    MidnightMismatch,
     #[error("every grouped offer must set exactly one non-zero cap")]
     InvalidCap,
     #[error("all offers in a group must use the same cap mode and value")]
@@ -82,6 +89,12 @@ pub enum OfferTreeError {
     Empty,
     #[error("offer tree contains a duplicate offer hash")]
     DuplicateOffer,
+    #[error("all offers in a ratified tree must use the same chain id")]
+    ChainIdMismatch,
+    #[error("all offers in a ratified tree must use the same Midnight contract")]
+    MidnightMismatch,
+    #[error("all offers in a ratified tree must use the same ratifier")]
+    RatifierMismatch,
 }
 
 pub type Word = [u8; 32];
@@ -337,6 +350,8 @@ impl OfferGroup {
         let maker = first.maker;
         let buy = first.buy;
         let loan_token = first.market.loan_token;
+        let chain_id = first.market.chain_id;
+        let midnight = first.market.midnight;
         let max_units = first.max_units;
         let max_assets = first.max_assets;
 
@@ -349,6 +364,12 @@ impl OfferGroup {
             }
             if offer.market.loan_token != loan_token {
                 return Err(GroupError::LoanTokenMismatch);
+            }
+            if offer.market.chain_id != chain_id {
+                return Err(GroupError::ChainIdMismatch);
+            }
+            if offer.market.midnight != midnight {
+                return Err(GroupError::MidnightMismatch);
             }
             if (offer.max_units == 0) == (offer.max_assets == 0) {
                 return Err(GroupError::InvalidCap);
@@ -430,7 +451,7 @@ pub fn hash_node(left: &Word, right: &Word) -> Word {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OfferTree {
     /// `levels[0]` = leaves, `levels[height]` = `[root]`
-    pub levels: Vec<Vec<Word>>,
+    levels: Vec<Vec<Word>>,
 }
 
 /// A canonical tree plus the final offers in leaf order, including zero padding.
@@ -489,6 +510,19 @@ impl OfferTree {
             return Err(OfferTreeError::Empty);
         }
 
+        let first = &offers[0];
+        for offer in &offers[1..] {
+            if offer.market.chain_id != first.market.chain_id {
+                return Err(OfferTreeError::ChainIdMismatch);
+            }
+            if offer.market.midnight != first.market.midnight {
+                return Err(OfferTreeError::MidnightMismatch);
+            }
+            if offer.ratifier != first.ratifier {
+                return Err(OfferTreeError::RatifierMismatch);
+            }
+        }
+
         let mut seen = HashSet::with_capacity(offers.len());
         for offer in &offers {
             if !seen.insert(hash_offer(offer)) {
@@ -510,7 +544,11 @@ impl OfferTree {
     }
 
     /// Merkle proof for the leaf at `index`, sibling per level (matches HashLib.isLeaf order).
-    pub fn proof(&self, index: usize) -> Vec<Word> {
+    pub fn proof(&self, index: usize) -> Result<Vec<Word>, TreeError> {
+        let leaves = self.levels[0].len();
+        if index >= leaves {
+            return Err(TreeError::LeafIndexOutOfRange { index, leaves });
+        }
         let mut proof = Vec::with_capacity(self.height());
         let mut idx = index;
         for level in &self.levels[..self.height()] {
@@ -518,13 +556,16 @@ impl OfferTree {
             proof.push(level[sib]);
             idx >>= 1;
         }
-        proof
+        Ok(proof)
     }
 }
 
 /// Recompute the root from a leaf + proof, exactly as `HashLib.isLeaf` does on-chain -
 /// including its leaf-index range check, whose `LeafIndexOutOfRange` revert is `false` here.
 pub fn verify_leaf(root: &Word, leaf: &Word, leaf_index: usize, proof: &[Word]) -> bool {
+    if proof.len() > MAX_TREE_HEIGHT {
+        return false;
+    }
     // HashLib.isLeaf requires leafIndex >> proof.length == 0: high bits beyond the proof are
     // never consumed by the fold, so an index outside [0, 2^len) could otherwise "verify"
     // off-chain and then revert on-chain. (A shift past usize::BITS - well-defined on the
@@ -534,7 +575,7 @@ pub fn verify_leaf(root: &Word, leaf: &Word, leaf_index: usize, proof: &[Word]) 
     }
     let mut cur = *leaf;
     for (i, sib) in proof.iter().enumerate() {
-        cur = if (leaf_index >> i) & 1 == 0 {
+        cur = if leaf_index.checked_shr(i as u32).unwrap_or(0) & 1 == 0 {
             hash_node(&cur, sib)
         } else {
             hash_node(sib, &cur)
@@ -645,6 +686,11 @@ pub fn verify(
     ratifier: &Address,
     expected_maker: &Address,
 ) -> bool {
+    // The contract verifies the signature in the offer's own chain/ratifier domain. Reject a
+    // caller-supplied domain that is inconsistent with those signed offer fields.
+    if chain_id != offer.market.chain_id || *ratifier != offer.ratifier {
+        return false;
+    }
     // The ratifier calls HashLib.offerTreeTypeHash(proof.length), which reverts TreeTooHigh
     // above MAX_TREE_HEIGHT - such a take can never pass (and there is no digest to rebuild).
     if proof.len() > MAX_TREE_HEIGHT {
@@ -732,7 +778,7 @@ mod tests {
                     offer,
                     &tree.root(),
                     i,
-                    &tree.proof(i),
+                    &tree.proof(i).unwrap(),
                     &sig,
                     chain_id,
                     &ratifier,
@@ -760,7 +806,7 @@ mod tests {
             &offers[0],
             &tree.root(),
             0,
-            &tree.proof(0),
+            &tree.proof(0).unwrap(),
             &sig,
             chain_id,
             &ratifier,
@@ -787,7 +833,7 @@ mod tests {
             &tampered,
             &tree.root(),
             0,
-            &tree.proof(0),
+            &tree.proof(0).unwrap(),
             &sig,
             chain_id,
             &ratifier,
@@ -799,7 +845,7 @@ mod tests {
             &offers[0],
             &tree.root(),
             1,
-            &tree.proof(1),
+            &tree.proof(1).unwrap(),
             &sig,
             chain_id,
             &ratifier,
@@ -811,11 +857,56 @@ mod tests {
             &offers[0],
             &tree.root(),
             0,
-            &tree.proof(0),
+            &tree.proof(0).unwrap(),
             &sig,
             word_u64(999),
             &ratifier,
             &maker
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_a_valid_signature_for_a_domain_not_bound_to_the_offer() {
+        let sk = SigningKey::from_bytes(&[0x07u8; 32].into()).unwrap();
+        let maker = signer_address(&sk);
+        let offer = tiny_offer(maker, 0);
+        let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+
+        let wrong_chain = word_u64(999);
+        let chain_sig = sign_digest(
+            &sk,
+            &tree_digest(tree.root(), tree.height(), wrong_chain, &offer.ratifier),
+        );
+        assert!(!verify(
+            &offer,
+            &tree.root(),
+            0,
+            &[],
+            &chain_sig,
+            wrong_chain,
+            &offer.ratifier,
+            &maker,
+        ));
+
+        let wrong_ratifier = [0xcc; 20];
+        let ratifier_sig = sign_digest(
+            &sk,
+            &tree_digest(
+                tree.root(),
+                tree.height(),
+                offer.market.chain_id,
+                &wrong_ratifier,
+            ),
+        );
+        assert!(!verify(
+            &offer,
+            &tree.root(),
+            0,
+            &[],
+            &ratifier_sig,
+            offer.market.chain_id,
+            &wrong_ratifier,
+            &maker,
         ));
     }
 
@@ -834,7 +925,7 @@ mod tests {
         // without the range check it would "verify" off-chain and then revert on-chain.
         let leaves = vec![keccak(b"a"), keccak(b"b")];
         let tree = OfferTree::build(leaves.clone()).unwrap();
-        let proof = tree.proof(0);
+        let proof = tree.proof(0).unwrap();
         assert!(verify_leaf(&tree.root(), &leaves[0], 0, &proof));
         assert!(!verify_leaf(&tree.root(), &leaves[0], 2, &proof));
 

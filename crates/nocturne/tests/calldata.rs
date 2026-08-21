@@ -53,7 +53,7 @@ fn ratifier_data_round_trips() {
     let other = offer_for([0x99; 20]);
     let tree = OfferTree::build(vec![hash_offer(&offer), hash_offer(&other)]).unwrap();
     let leaf_index = 0;
-    let proof = tree.proof(leaf_index);
+    let proof = tree.proof(leaf_index).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
 
@@ -74,7 +74,7 @@ fn take_calldata_round_trips() {
     let chain_id = word_from_u64(31337);
 
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
-    let proof = tree.proof(0);
+    let proof = tree.proof(0).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
     let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &proof);
@@ -159,7 +159,7 @@ fn any_ratifier_data_discriminates_both_layouts() {
 fn take_with_setter_ratifier_data_decodes() {
     let offer = offer_for([0x42; 20]);
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
-    let ratifier_data = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0));
+    let ratifier_data = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(
         &offer,
         &ratifier_data,
@@ -198,7 +198,7 @@ fn decoded_calldata_verifies_signature_and_root() {
             &ratifier,
         ))
         .unwrap();
-    let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
+    let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(
         &offer,
         &ratifier_data,

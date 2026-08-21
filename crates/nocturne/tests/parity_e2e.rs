@@ -143,7 +143,7 @@ fn contract_accepted_signature_passes_verify() {
             &offers[0],
             &tree.root(),
             0,
-            &tree.proof(0),
+            &tree.proof(0).unwrap(),
             &sig,
             u256(CHAIN_ID),
             &hx20(RATIFIER),

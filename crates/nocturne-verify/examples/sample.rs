@@ -47,7 +47,7 @@ fn main() {
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &offer.ratifier);
     let sig = signer.sign_digest(&digest).unwrap();
-    let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
+    let ratifier_data = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0).unwrap());
     let take = encode_take_calldata(
         &offer,
         &ratifier_data,

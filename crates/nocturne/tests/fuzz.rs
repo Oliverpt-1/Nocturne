@@ -150,7 +150,7 @@ proptest! {
         prop_assert_eq!(tree.height(), n.trailing_zeros() as usize);
 
         for i in 0..n {
-            let proof = tree.proof(i);
+            let proof = tree.proof(i).unwrap();
             prop_assert!(verify_leaf(&root, &leaves[i], i, &proof), "leaf {} must verify", i);
 
             // Corrupting any proof word must make verification fail (skip the 1-leaf tree,
@@ -180,10 +180,14 @@ proptest! {
         let sk = sk.unwrap();
         let signer = signer_address(&sk);
 
+        let mut offer = offer;
+        offer.market.chain_id = chain_id;
+        offer.ratifier = ratifier;
+
         let leaf = hash_offer(&offer);
         let tree = OfferTree::build(vec![leaf]).unwrap();
         let root = tree.root();
-        let proof = tree.proof(0);
+        let proof = tree.proof(0).unwrap();
         let digest = tree_digest(root, tree.height(), chain_id, &ratifier);
         let sig = sign_digest(&sk, &digest);
 

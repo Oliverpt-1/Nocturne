@@ -73,7 +73,7 @@ fn main() {
             tick_to_apr(tick, ttm).unwrap()
         );
         // A taker lifts rung i by submitting (sig, root, i, proof(i)) - prove it would ratify.
-        let proof = tree.proof(i);
+        let proof = tree.proof(i).unwrap();
         assert!(verify(
             offer,
             &tree.root(),

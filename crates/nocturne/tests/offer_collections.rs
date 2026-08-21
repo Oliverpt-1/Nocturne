@@ -1,6 +1,6 @@
 use nocturne::{
     empty_offer, hash_offer, offer_group_id, word_from_u64, CollateralParams, GroupError, Market,
-    Offer, OfferGroup, OfferTree, U256,
+    Offer, OfferGroup, OfferTree, OfferTreeError, U256,
 };
 
 fn addr(last: u8) -> [u8; 20] {
@@ -107,6 +107,48 @@ fn group_rejects_mismatched_consumption_caps() {
     assert_eq!(
         OfferGroup::create(offers).unwrap_err(),
         GroupError::CapMismatch
+    );
+}
+
+#[test]
+fn group_rejects_mixed_chain_and_midnight_domains() {
+    let mut offers = fixture_offers();
+    offers[1].market.chain_id = word_from_u64(1);
+    assert_eq!(
+        OfferGroup::create(offers).unwrap_err(),
+        GroupError::ChainIdMismatch
+    );
+
+    let mut offers = fixture_offers();
+    offers[1].market.midnight = addr(0x11);
+    assert_eq!(
+        OfferGroup::create(offers).unwrap_err(),
+        GroupError::MidnightMismatch
+    );
+}
+
+#[test]
+fn tree_rejects_mixed_signing_domains_across_entries() {
+    let offers = fixture_offers();
+    let mut wrong_chain = offers[1].clone();
+    wrong_chain.market.chain_id = word_from_u64(1);
+    assert_eq!(
+        OfferTree::from_entries([offers[0].clone(), wrong_chain]).unwrap_err(),
+        OfferTreeError::ChainIdMismatch
+    );
+
+    let mut wrong_midnight = offers[1].clone();
+    wrong_midnight.market.midnight = addr(0x11);
+    assert_eq!(
+        OfferTree::from_entries([offers[0].clone(), wrong_midnight]).unwrap_err(),
+        OfferTreeError::MidnightMismatch
+    );
+
+    let mut wrong_ratifier = offers[1].clone();
+    wrong_ratifier.ratifier = addr(0x41);
+    assert_eq!(
+        OfferTree::from_entries([offers[0].clone(), wrong_ratifier]).unwrap_err(),
+        OfferTreeError::RatifierMismatch
     );
 }
 

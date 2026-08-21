@@ -74,7 +74,7 @@ fn merkle_proof_roundtrips() {
     let tree = OfferTree::build(leaves.clone()).unwrap();
     for (i, leaf) in leaves.iter().enumerate() {
         assert!(
-            verify_leaf(&tree.root(), leaf, i, &tree.proof(i)),
+            verify_leaf(&tree.root(), leaf, i, &tree.proof(i).unwrap()),
             "leaf {i}"
         );
     }

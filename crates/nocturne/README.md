@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         offer,
         &tree.root(),
         0,
-        &tree.proof(0),
+        &tree.proof(0).unwrap(),
         &signature,
         chain_id,
         &ratifier,

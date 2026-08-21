@@ -72,7 +72,7 @@ fn signed_take_sig(high_s: bool) -> (String, Offer, Address) {
             v: if sig.v == 27 { 28 } else { 27 },
         };
     }
-    let rd = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
+    let rd = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(
         &offer,
         &rd,
@@ -258,7 +258,7 @@ fn verify_fails_for_out_of_range_leaf_index() {
             &offer.ratifier,
         ))
         .unwrap();
-    let rd = encode_ratifier_data(&sig, &tree.root(), 2, &tree.proof(0));
+    let rd = encode_ratifier_data(&sig, &tree.root(), 2, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(
         &offer,
         &rd,
@@ -445,7 +445,7 @@ fn signed_bundle(tamper: bool) -> (String, [Offer; 2], Address) {
         .iter()
         .enumerate()
         .map(|(i, offer)| {
-            let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i));
+            let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i).unwrap());
             OfferFill {
                 offer: offer.clone(),
                 ratifier_data: decode_any_ratifier_data(&raw).unwrap(),
@@ -565,7 +565,7 @@ fn setter_take(tamper: bool) -> String {
     if tamper {
         offer.tick = word_from_u64(1000);
     }
-    let rd = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0));
+    let rd = encode_setter_ratifier_data(&tree.root(), 0, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(
         &offer,
         &rd,

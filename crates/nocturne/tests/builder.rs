@@ -224,7 +224,7 @@ fn built_offer_hashes_and_signs() {
         &offer,
         &tree.root(),
         0,
-        &tree.proof(0),
+        &tree.proof(0).unwrap(),
         &sig,
         chain_id,
         &RATIFIER,

@@ -56,6 +56,28 @@ fn tree_build_errors_instead_of_panicking() {
 }
 
 #[test]
+fn tree_proof_errors_instead_of_panicking_out_of_range() {
+    let tree = OfferTree::build(vec![[0u8; 32]; 2]).unwrap();
+    assert_eq!(
+        tree.proof(2),
+        Err(TreeError::LeafIndexOutOfRange {
+            index: 2,
+            leaves: 2,
+        })
+    );
+}
+
+#[test]
+fn verify_leaf_rejects_oversized_proofs_without_panicking() {
+    assert!(!verify_leaf(
+        &[0u8; 32],
+        &[0u8; 32],
+        0,
+        &vec![[0u8; 32]; MAX_TREE_HEIGHT + 1],
+    ));
+}
+
+#[test]
 fn tree_build_rejects_trees_taller_than_the_onchain_cap() {
     // HashLib.offerTreeTypeHash reverts TreeTooHigh above height 20, so 2^21 leaves must be
     // rejected up front rather than producing a tree no ratifier will ever accept.

@@ -113,7 +113,7 @@ fn main() {
     println!("CANCEL {}", hx(&encode_cancel_root_calldata(&maker, &root)));
 
     let take = |o: &Offer, i: usize, units: u128| {
-        let rd = encode_ratifier_data(&sig, &root, i, &tree.proof(i));
+        let rd = encode_ratifier_data(&sig, &root, i, &tree.proof(i).unwrap());
         encode_take_calldata(
             o,
             &rd,

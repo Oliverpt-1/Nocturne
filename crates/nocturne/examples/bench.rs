@@ -62,10 +62,10 @@ fn pipeline(offers: &[Offer], sk: &SigningKey, parallel: bool) -> (Word, u128) {
     let _proofs: Vec<Vec<Word>> = if parallel {
         (0..offers.len())
             .into_par_iter()
-            .map(|i| tree.proof(i))
+            .map(|i| tree.proof(i).unwrap())
             .collect()
     } else {
-        (0..offers.len()).map(|i| tree.proof(i)).collect()
+        (0..offers.len()).map(|i| tree.proof(i).unwrap()).collect()
     };
     let digest = tree_digest(tree.root(), tree.height(), chain_id, &ratifier);
     let _sig = sign_digest(sk, &digest);

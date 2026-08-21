@@ -60,7 +60,7 @@ fn signed_fills() -> (Vec<OfferFill>, Address) {
         .iter()
         .enumerate()
         .map(|(i, offer)| {
-            let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i));
+            let raw = encode_ratifier_data(&sig, &tree.root(), i, &tree.proof(i).unwrap());
             OfferFill {
                 offer: offer.clone(),
                 ratifier_data: decode_any_ratifier_data(&raw).unwrap(),

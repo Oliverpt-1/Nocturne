@@ -97,7 +97,7 @@ fn gen() {
     let offer = offer(maker, ratifier);
     let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
     let root = tree.root();
-    let proof = tree.proof(0);
+    let proof = tree.proof(0).unwrap();
 
     // offer signature (maker's key) + self-check it verifies
     let digest = tree_digest(root, tree.height(), chain_id, &ratifier);

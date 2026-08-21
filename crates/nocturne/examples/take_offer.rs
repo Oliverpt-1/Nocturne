@@ -91,7 +91,7 @@ fn main() {
 
     // 4. Encode the transaction: the signature and Merkle proof travel as ratifier data inside
     //    the `take` calldata.
-    let rd = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0));
+    let rd = encode_ratifier_data(&sig, &tree.root(), 0, &tree.proof(0).unwrap());
     let calldata = encode_take_calldata(offer, &rd, units, &TAKER, &TAKER, &[0u8; 20], &[]);
 
     // Round-trip: the bytes decode back to exactly what we meant to send.
