@@ -86,6 +86,20 @@ fn take_amounts_zero_fee_buy() {
 }
 
 #[test]
+fn take_amounts_reports_uint256_overflow_instead_of_wrapping() {
+    let offer = OfferBuilder::new(market(), MAKER)
+        .buy()
+        .tick(3372)
+        .ratifier(RATIFIER)
+        .max_units(u128::MAX)
+        .build();
+    assert_eq!(
+        take_amounts(&offer, U256::MAX, 1_000_000_000, [0; 7]),
+        Err(SimError::ArithmeticOverflow)
+    );
+}
+
+#[test]
 fn take_amounts_with_fee_buy_splits_correctly() {
     // price 0.5 WAD, fee = 100*CBP = 1e14 WAD (cbp6, ttm >= 360d).
     let offer = OfferBuilder::new(market(), MAKER)
@@ -197,6 +211,19 @@ fn simulate_flags_consumed_units() {
     let out = simulate_take(&offer, U256::from(1_000u64), &ctx).unwrap();
     assert!(out.reverts.contains(&OfferError::ConsumedUnits));
     assert_eq!(out.new_consumed, U256::from(10_500u64));
+}
+
+#[test]
+fn simulate_reports_consumption_overflow_instead_of_wrapping() {
+    let mut offer = buy_offer();
+    offer.tick = word_from_u64(0);
+    offer.max_units = u128::MAX;
+    let mut ctx = base_ctx();
+    ctx.consumed = 1;
+    assert!(matches!(
+        simulate_take(&offer, U256::MAX, &ctx),
+        Err(SimError::ArithmeticOverflow)
+    ));
 }
 
 #[test]

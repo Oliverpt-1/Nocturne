@@ -122,6 +122,8 @@ fn sdk_consumable_units_match_market_quote_vectors() {
     let market_fee = U256::from(200_000_000u64);
     let mut buy = offer(true, 3_000, 0, 1_000_000);
     buy.market.maturity = word_from_u64(2_000_000_000);
+    buy.start = word_from_u64(0);
+    buy.expiry = word_from_u64(2_000_000_000);
     buy.continuous_fee_cap = word_from_u64(300_000_000);
 
     assert_eq!(
@@ -153,6 +155,45 @@ fn sdk_consumable_units_match_market_quote_vectors() {
     assert_eq!(
         get_consumable_units(&buy, 0, now, cbps, market_fee).unwrap(),
         U256::ZERO
+    );
+}
+
+#[test]
+fn sdk_consumable_units_are_zero_outside_the_offer_window() {
+    let cbps = [1, 2, 3, 4, 5, 6, 7];
+    let market_fee = U256::ZERO;
+    let mut offer = offer(true, 3_000, 1_000_000, 0);
+    offer.start = word_from_u64(NOW);
+    offer.expiry = word_from_u64(NOW + 200);
+
+    assert_eq!(
+        get_consumable_units(&offer, 0, NOW - 1, cbps, market_fee).unwrap(),
+        U256::ZERO
+    );
+    assert_ne!(
+        get_consumable_units(&offer, 0, NOW, cbps, market_fee).unwrap(),
+        U256::ZERO
+    );
+    assert_ne!(
+        get_consumable_units(&offer, 0, NOW + 200, cbps, market_fee).unwrap(),
+        U256::ZERO
+    );
+    assert_eq!(
+        get_consumable_units(&offer, 0, NOW + 201, cbps, market_fee).unwrap(),
+        U256::ZERO
+    );
+}
+
+#[test]
+fn sizing_reports_uint256_overflow_instead_of_wrapping() {
+    let offer = offer(true, TICK, u128::MAX, 0);
+    assert_eq!(
+        buyer_assets_to_units(&offer, U256::MAX, NOW, ZERO_CBPS),
+        Err(SizingError::ArithmeticOverflow)
+    );
+    assert_eq!(
+        seller_assets_to_units(&offer, U256::MAX, NOW, ZERO_CBPS),
+        Err(SizingError::ArithmeticOverflow)
     );
 }
 

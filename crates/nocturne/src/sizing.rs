@@ -44,6 +44,9 @@ pub enum SizingError {
     /// Midnight requires exactly one non-zero consumption cap.
     #[error("offer must set exactly one non-zero max-units or max-assets cap")]
     InvalidCap,
+    /// A checked EVM-style multiplication overflowed `uint256`.
+    #[error("uint256 multiplication overflow")]
+    ArithmeticOverflow,
 }
 
 #[inline]
@@ -53,14 +56,18 @@ fn wad() -> U256 {
 
 /// `x * y / d`, rounded down (`FixedPointMathLib.mulDivDown`). Caller guarantees `d != 0`.
 #[inline]
-fn mul_div_down(x: U256, y: U256, d: U256) -> U256 {
-    x * y / d
+fn mul_div_down(x: U256, y: U256, d: U256) -> Result<U256, SizingError> {
+    Ok(x.checked_mul(y).ok_or(SizingError::ArithmeticOverflow)? / d)
 }
 
 /// `(x * y + d - 1) / d`, rounded up (`FixedPointMathLib.mulDivUp`). Caller guarantees `d != 0`.
 #[inline]
-fn mul_div_up(x: U256, y: U256, d: U256) -> U256 {
-    (x * y + (d - U256::from(1u64))) / d
+fn mul_div_up(x: U256, y: U256, d: U256) -> Result<U256, SizingError> {
+    let product = x.checked_mul(y).ok_or(SizingError::ArithmeticOverflow)?;
+    if product.is_zero() {
+        return Ok(U256::ZERO);
+    }
+    Ok((product - U256::from(1u8)) / d + U256::from(1u8))
 }
 
 #[inline]
@@ -122,11 +129,11 @@ pub fn buyer_assets_to_units(
     if buyer_price.is_zero() {
         return Err(SizingError::ZeroPrice);
     }
-    Ok(if offer.buy {
+    if offer.buy {
         mul_div_up(target_buyer_assets, wad(), buyer_price)
     } else {
         mul_div_down(target_buyer_assets, wad(), buyer_price)
-    })
+    }
 }
 
 /// Units a taker must lift so the **seller** receives exactly `target_seller_assets`.
@@ -144,11 +151,11 @@ pub fn seller_assets_to_units(
     if seller_price.is_zero() {
         return Err(SizingError::ZeroPrice);
     }
-    Ok(if offer.buy {
+    if offer.buy {
         mul_div_up(target_seller_assets, wad(), seller_price)
     } else {
         mul_div_down(target_seller_assets, wad(), seller_price)
-    })
+    }
 }
 
 /// Units still takeable on `offer` given `consumed` so far - enough to fully consume it.
@@ -190,6 +197,10 @@ pub fn get_consumable_units(
     if (offer.max_units == 0) == (offer.max_assets == 0) {
         return Err(SizingError::InvalidCap);
     }
+    let now = U256::from(now);
+    if now < word_to_u256(&offer.start) || now > word_to_u256(&offer.expiry) {
+        return Ok(U256::ZERO);
+    }
     if word_to_u256(&offer.continuous_fee_cap) < market_continuous_fee {
         return Ok(U256::ZERO);
     }
@@ -198,6 +209,7 @@ pub fn get_consumable_units(
     }
 
     let remaining_assets = U256::from(zero_floor_sub_u128(offer.max_assets, consumed));
+    let now = u64::try_from(now).expect("now originated as u64");
     let (seller_price, buyer_price) = prices(offer, now, cbps)?;
     if offer.buy {
         if buyer_price.is_zero() {
@@ -208,6 +220,6 @@ pub fn get_consumable_units(
         if seller_price.is_zero() {
             return Ok(U256::MAX);
         }
-        Ok(mul_div_down(remaining_assets, wad(), seller_price))
+        mul_div_down(remaining_assets, wad(), seller_price)
     }
 }

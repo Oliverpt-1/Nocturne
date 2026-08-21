@@ -38,12 +38,18 @@ pub enum SimError {
     /// `TickLib.priceToTick`'s `require(price <= 1e18, PriceGreaterThanOne())`.
     #[error("price exceeds 1e18 (WAD)")]
     PriceGreaterThanOne,
+    /// The spacing must be positive and divide `MAX_TICK`, exactly like the SDK helper.
+    #[error("tick spacing {0} must be positive and divide MAX_TICK ({MAX_TICK})")]
+    InvalidTickSpacing(u64),
     /// The time-to-maturity is zero, so a term rate cannot be annualized.
     #[error("time-to-maturity is zero")]
     ZeroTimeToMaturity,
     /// The tick's price is zero, so the term rate `1/P - 1` is undefined.
     #[error("price is zero; term rate is undefined")]
     ZeroPrice,
+    /// A checked EVM-style multiplication overflowed `uint256`.
+    #[error("uint256 multiplication overflow")]
+    ArithmeticOverflow,
 }
 
 /// Seconds in a (non-leap) year: `365 * 24 * 3600`. Used to annualize term rates in APR math.
@@ -67,13 +73,17 @@ fn div_half_down(x: U256, d: U256) -> U256 {
 }
 
 #[inline]
-fn mul_div_down(x: U256, y: U256, d: U256) -> U256 {
-    x * y / d
+fn mul_div_down(x: U256, y: U256, d: U256) -> Result<U256, SimError> {
+    Ok(x.checked_mul(y).ok_or(SimError::ArithmeticOverflow)? / d)
 }
 
 #[inline]
-fn mul_div_up(x: U256, y: U256, d: U256) -> U256 {
-    (x * y + (d - U256::from(1u64))) / d
+fn mul_div_up(x: U256, y: U256, d: U256) -> Result<U256, SimError> {
+    let product = x.checked_mul(y).ok_or(SimError::ArithmeticOverflow)?;
+    if product.is_zero() {
+        return Ok(U256::ZERO);
+    }
+    Ok((product - U256::from(1u8)) / d + U256::from(1u8))
 }
 
 #[inline]
@@ -120,7 +130,7 @@ pub fn tick_to_rate(tick: u64) -> Result<U256, SimError> {
     if price.is_zero() {
         return Err(SimError::ZeroPrice);
     }
-    Ok(mul_div_up(wad(), wad(), price) - wad())
+    Ok(mul_div_up(wad(), wad(), price)? - wad())
 }
 
 /// Exact WAD-scaled simple APR for a tick and time to maturity, rounded up.
@@ -128,11 +138,11 @@ pub fn tick_to_apr_wad(tick: u64, ttm_secs: u64) -> Result<U256, SimError> {
     if ttm_secs == 0 {
         return Err(SimError::ZeroTimeToMaturity);
     }
-    Ok(mul_div_up(
+    mul_div_up(
         tick_to_rate(tick)?,
         U256::from(SECONDS_PER_YEAR),
         U256::from(ttm_secs),
-    ))
+    )
 }
 
 /// `TickLib.priceToTick` - among the ticks that are multiples of `spacing`, the lowest one whose
@@ -148,6 +158,9 @@ pub fn tick_to_apr_wad(tick: u64, ttm_secs: u64) -> Result<U256, SimError> {
 pub fn price_to_tick(price: U256, spacing: u64) -> Result<u64, SimError> {
     if price > wad() {
         return Err(SimError::PriceGreaterThanOne);
+    }
+    if spacing == 0 || MAX_TICK % spacing != 0 {
+        return Err(SimError::InvalidTickSpacing(spacing));
     }
     let mut low: u64 = 0;
     let mut high: u64 = MAX_TICK;
@@ -283,13 +296,13 @@ pub fn take_amounts(
 
     let (buyer_assets, seller_assets) = if offer.buy {
         (
-            mul_div_down(units, buyer_price, wad()),
-            mul_div_down(units, seller_price, wad()),
+            mul_div_down(units, buyer_price, wad())?,
+            mul_div_down(units, seller_price, wad())?,
         )
     } else {
         (
-            mul_div_up(units, buyer_price, wad()),
-            mul_div_up(units, seller_price, wad()),
+            mul_div_up(units, buyer_price, wad())?,
+            mul_div_up(units, seller_price, wad())?,
         )
     };
 
@@ -423,13 +436,17 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
         } else {
             amounts.seller_assets
         };
-        let nc = consumed + add;
+        let nc = consumed
+            .checked_add(add)
+            .ok_or(SimError::ArithmeticOverflow)?;
         if nc > U256::from(offer.max_assets) {
             reverts.push(OfferError::ConsumedAssets);
         }
         nc
     } else if units_capped {
-        let nc = consumed + units;
+        let nc = consumed
+            .checked_add(units)
+            .ok_or(SimError::ArithmeticOverflow)?;
         if nc > U256::from(offer.max_units) {
             reverts.push(OfferError::ConsumedUnits);
         }
@@ -450,17 +467,17 @@ pub fn simulate_take(offer: &Offer, units: U256, ctx: &SimCtx) -> Result<TakeOut
     let seller_debt_increase = units - seller_credit_decrease;
 
     let ttm = zero_floor_sub(word_to_u256(&offer.market.maturity), now);
-    let buyer_pending_fee_increase = mul_div_down(
-        buyer_credit_increase,
-        U256::from(ctx.market.continuous_fee) * ttm,
-        wad(),
-    );
+    let continuous_fee_over_term = U256::from(ctx.market.continuous_fee)
+        .checked_mul(ttm)
+        .ok_or(SimError::ArithmeticOverflow)?;
+    let buyer_pending_fee_increase =
+        mul_div_down(buyer_credit_increase, continuous_fee_over_term, wad())?;
     let seller_pending_fee_decrease = if seller_pos.credit > 0 {
         mul_div_up(
             U256::from(seller_pos.pending_fee),
             seller_credit_decrease,
             U256::from(seller_pos.credit),
-        )
+        )?
     } else {
         U256::ZERO
     };

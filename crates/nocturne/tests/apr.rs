@@ -184,6 +184,14 @@ fn error_paths() {
         price_to_tick(u256(1_000_000_000_000_000_001), SPACING),
         Err(SimError::PriceGreaterThanOne)
     );
+    assert_eq!(
+        price_to_tick(u256(500_000_000_000_000_000), 0),
+        Err(SimError::InvalidTickSpacing(0))
+    );
+    assert_eq!(
+        price_to_tick(u256(500_000_000_000_000_000), 5),
+        Err(SimError::InvalidTickSpacing(5))
+    );
     // Zero time-to-maturity cannot be annualized.
     assert_eq!(tick_to_apr(3976, 0), Err(SimError::ZeroTimeToMaturity));
     // Out-of-range tick propagates from tick_to_price.
