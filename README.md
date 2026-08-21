@@ -7,73 +7,66 @@
 <p align="center"><em>Fast off-chain signing and offers for the Morpho Midnight protocol.</em></p>
 
 <p align="center">
+  <a href="crates/nocturne/README.md">SDK Guide</a> |
+  <a href="https://docs.rs/nocturne-midnight">API Docs</a> |
+  <a href="crates/nocturne/examples">Examples</a> |
+  <a href="crates/nocturne-verify/README.md">Verifier</a>
+</p>
+
+<p align="center">
   <img src="assets/nocturne.png" alt="Nocturne - made in Rust" width="100%">
 </p>
 
 ## What is Nocturne?
 
-**Nocturne** is a high-performance Rust library for building, signing, validating, publishing, and
-executing offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol.
-
-Designed for market makers, trading firms, integrators, and protocol developers, Nocturne provides
-the infrastructure needed to quote markets, generate Merkle trees, sign offers, simulate execution,
-read the public order book, and submit wallet-ready transactions without switching languages.
-
-Every hash, signature, price calculation, and calldata layout is checked byte-for-byte against
-vectors derived from the protocol contracts (`cargo test`), and the full offer lifecycle is
-exercised against the real contracts on a live Anvil deployment (`crates/nocturne/e2e/`).
-
-Built and maintained by Oliver Tipton, and licensed under the Apache-2.0 and MIT licenses.
-
-> **Note:** This project is **not** endorsed by, nor affiliated with, Morpho. See the full
-> [disclaimer](DISCLAIMER.md).
+Nocturne is a Rust SDK for integrating with the
+[Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It builds and signs offers,
+constructs Merkle trees, simulates execution, reads the public order book, encodes calldata and
+mempool payloads, and produces transactions that Rust wallet clients can submit.
 
 ## Status
 
-This is an early (v0.1.0) release. Nocturne is checked byte-for-byte against vectors derived from
-the Midnight contracts and exercised end-to-end against the real contracts on a live anvil
-deployment, but it has **not** been independently security-audited. Verify against your own deployment before relying on it with real value, and see
-[SECURITY.md](SECURITY.md) to report issues.
+Nocturne is an early v0.1.0 release and has not been independently security-audited. See
+[SECURITY.md](SECURITY.md) before using it with real value.
 
-## Getting help
+## For Integrators
 
-- Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
-- Open a [GitHub issue](https://github.com/Oliverpt-1/Nocturne/issues) for bugs and features.
-
-## Choose what you need
-
-Nocturne has one Rust library and one CLI built on that library:
-
-| Goal | Use |
-|---|---|
-| Build, sign, query, publish, or execute Midnight integrations | [`nocturne-midnight`](crates/nocturne/README.md), imported in Rust as `nocturne` |
-| Inspect and independently verify an existing payload | [`nocturne-verify`](crates/nocturne-verify/README.md) |
-
-Add the SDK to a Rust project:
+The SDK package is `nocturne-midnight` and is imported in Rust as `nocturne`:
 
 ```toml
 [dependencies]
 nocturne = { package = "nocturne-midnight", version = "0.1.0" }
 ```
 
-Install the optional verifier CLI when you need to review opaque calldata or typed data:
+Start with the [SDK guide](crates/nocturne/README.md) for a copy-paste quickstart, publication flow,
+and common workflows. The [examples](crates/nocturne/examples) are runnable with Cargo, and the
+[API documentation](https://docs.rs/nocturne-midnight) covers the complete public surface.
+
+`nocturne-verify` is a separate CLI for inspecting an existing payload or typed-data request
+without creating or submitting transactions. Its [verifier guide](crates/nocturne-verify/README.md)
+contains installation and usage instructions.
+
+## For Developers
+
+The minimum supported Rust version is 1.90. Run the local test suite with:
 
 ```sh
-cargo install nocturne-verify
-
-nocturne-verify decode 0x6a14c9ef...                    # opaque calldata -> readable terms
-nocturne-verify verify 0x6a14c9ef... --chain-id 31337   # reproduce the root, check the signature
-nocturne-verify digest offer.json  --chain-id 31337 \
-    --expect 0xWalletDigest                             # cross-check the wallet digest vs your terms
+cargo test --workspace --all-targets
 ```
 
-The [SDK guide](crates/nocturne/README.md) contains the copy-paste quickstart and runnable examples.
-The [verifier guide](crates/nocturne-verify/README.md) explains its full offline review workflow.
+Protocol-critical outputs are checked against contract and SDK vectors. The
+[live Anvil harness](crates/nocturne/e2e) exercises the complete lifecycle against deployed
+Midnight contracts and requires Foundry plus a compatible contracts checkout.
+
+## Getting help
+
+- Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
+- Open a [GitHub issue](https://github.com/Oliverpt-1/Nocturne/issues) for bugs and features.
 
 ## Security
 
-`nocturne` produces signatures and calldata that move real value. See [SECURITY.md](SECURITY.md)
-for how to report vulnerabilities privately.
+Nocturne produces signatures and calldata that can move real value. Report vulnerabilities
+privately using the process in [SECURITY.md](SECURITY.md).
 
 ## Acknowledgements
 
@@ -89,7 +82,7 @@ for how to report vulnerabilities privately.
 
 ## Disclaimer
 
-Independent, personal open source project - not created, endorsed, audited, or supported by Morpho.
+Independent, personal open source project—not created, endorsed, or supported by Morpho.
 Provided "AS IS" with no warranty and no liability, and it is not financial, investment, or legal
 advice. Interacting with blockchain protocols and automated trading carries significant risk,
 including total loss of funds. See [DISCLAIMER.md](DISCLAIMER.md) for the full text.
