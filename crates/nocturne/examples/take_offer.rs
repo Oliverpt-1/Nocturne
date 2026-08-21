@@ -27,7 +27,8 @@ fn main() {
             [0x44; 20],
         )
         .maturity(MATURITY)
-        .build();
+        .build_checked()
+        .expect("valid market");
     let offer = OfferBuilder::new(market, maker)
         .lend()
         .apr(7.2, NOW)

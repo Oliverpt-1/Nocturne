@@ -1,6 +1,6 @@
 use nocturne::{
     canonical_market, encode_market_params, hash_market, market_id, word_from_u64, Address,
-    CollateralParams, Market, MarketBuilder, U256,
+    CollateralParams, Market, MarketBuildError, MarketBuilder, MAX_COLLATERALS, U256,
 };
 
 fn address(value: &str) -> Address {
@@ -115,5 +115,45 @@ fn raw_market_build_also_sorts_collateral() {
             .map(|collateral| collateral.token)
             .collect::<Vec<_>>(),
         vec![token(0x30), token(0x70)]
+    );
+}
+
+#[test]
+fn checked_market_build_rejects_invalid_collateral_structure() {
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::NoCollateralParams
+    );
+
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral([0u8; 20], U256::from(1u64), U256::from(1u64), token(1))
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::ZeroCollateralToken
+    );
+
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral(token(0x30), U256::from(1u64), U256::from(1u64), token(0x31))
+            .collateral(token(0x30), U256::from(2u64), U256::from(2u64), token(0x32))
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::DuplicateCollateralToken(token(0x30))
+    );
+
+    let oversized = (1..=MAX_COLLATERALS + 1).fold(
+        MarketBuilder::new(8453, token(0x10), token(0x20)),
+        |builder, index| {
+            let mut collateral = [0u8; 20];
+            collateral[18..].copy_from_slice(&(index as u16).to_be_bytes());
+            builder.collateral(collateral, U256::from(1u64), U256::from(1u64), token(0x40))
+        },
+    );
+    assert_eq!(
+        oversized.build_checked().unwrap_err(),
+        MarketBuildError::TooManyCollateralParams(MAX_COLLATERALS + 1)
     );
 }

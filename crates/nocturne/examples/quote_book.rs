@@ -21,7 +21,8 @@ fn market() -> Market {
             [0x44; 20],
         )
         .maturity(MATURITY)
-        .build()
+        .build_checked()
+        .expect("valid market")
 }
 
 /// Lend offers laddered up from `fair_apr`; the tree assigns one group per standalone rung.

@@ -37,10 +37,28 @@ pub enum BuildError {
     ExpiryNotSet,
 }
 
+/// Structural errors rejected by [`MarketBuilder::build_checked`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum MarketBuildError {
+    /// Midnight markets require at least one collateral entry.
+    #[error("market must configure at least one collateral token")]
+    NoCollateralParams,
+    /// Midnight accepts at most [`MAX_COLLATERALS`](crate::MAX_COLLATERALS) collateral entries.
+    #[error("market configures too many collateral tokens: {0}")]
+    TooManyCollateralParams(usize),
+    /// The zero address cannot be a collateral token.
+    #[error("collateral token must not be the zero address")]
+    ZeroCollateralToken,
+    /// Each collateral token may appear only once.
+    #[error("duplicate collateral token: {0:?}")]
+    DuplicateCollateralToken(Address),
+}
+
 /// Builder for a [`Market`]. Collateral parameters are sorted automatically into the ascending
-/// token order required by Midnight.
+/// token order required by Midnight. Use [`build_checked`](Self::build_checked) to reject invalid
+/// collateral structure before building offers.
 #[derive(Clone, Debug)]
-#[must_use = "call `.build()` to produce the Market"]
+#[must_use = "call `.build()` or `.build_checked()` to produce the Market"]
 pub struct MarketBuilder {
     chain_id: U256,
     midnight: Address,
@@ -123,6 +141,34 @@ impl MarketBuilder {
             enter_gate: self.enter_gate,
             liquidator_gate: self.liquidator_gate,
         }
+    }
+
+    /// Produce a canonically ordered market after checking collateral structure.
+    pub fn build_checked(self) -> Result<Market, MarketBuildError> {
+        let market = self.build();
+        if market.collateral_params.is_empty() {
+            return Err(MarketBuildError::NoCollateralParams);
+        }
+        if market.collateral_params.len() > crate::MAX_COLLATERALS {
+            return Err(MarketBuildError::TooManyCollateralParams(
+                market.collateral_params.len(),
+            ));
+        }
+        if market
+            .collateral_params
+            .iter()
+            .any(|collateral| collateral.token == [0u8; 20])
+        {
+            return Err(MarketBuildError::ZeroCollateralToken);
+        }
+        if let Some(pair) = market
+            .collateral_params
+            .windows(2)
+            .find(|pair| pair[0].token == pair[1].token)
+        {
+            return Err(MarketBuildError::DuplicateCollateralToken(pair[0].token));
+        }
+        Ok(market)
     }
 }
 

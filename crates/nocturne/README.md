@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             [0x44; 20],
         )
         .maturity(2_000_000_000)
-        .build();
+        .build_checked()?;
 
     let offer = OfferBuilder::new(market, maker)
         .lend()
