@@ -1,6 +1,6 @@
 use nocturne::{
-    canonical_market, hash_market, market_id, word_from_u64, Address, CollateralParams, Market,
-    U256,
+    canonical_market, encode_market_params, hash_market, market_id, word_from_u64, Address,
+    CollateralParams, Market, MarketBuilder, U256,
 };
 
 fn address(value: &str) -> Address {
@@ -30,6 +30,27 @@ fn fixture_market() -> Market {
         enter_gate: [0; 20],
         liquidator_gate: [0; 20],
     }
+}
+
+fn token(last: u8) -> Address {
+    let mut value = [0u8; 20];
+    value[19] = last;
+    value
+}
+
+fn builder_market(collateral_tokens: &[u8]) -> Market {
+    let mut builder = MarketBuilder::new(8453, token(0x10), token(0x20))
+        .maturity(2_000_000_000)
+        .rcf_threshold(U256::from(1_000u64));
+    for &last in collateral_tokens {
+        builder = builder.collateral(
+            token(last),
+            U256::from(770_000_000_000_000_000u64) + U256::from(last),
+            U256::from(250_000_000_000_000_000u64),
+            token(last + 1),
+        );
+    }
+    builder.build()
 }
 
 #[test]
@@ -65,4 +86,34 @@ fn market_identity_is_independent_of_collateral_input_order() {
         .collateral_params
         .windows(2)
         .all(|pair| pair[0].token < pair[1].token));
+}
+
+#[test]
+fn market_builder_canonicalizes_collateral_everywhere() {
+    let sorted = builder_market(&[0x30, 0x50, 0x70]);
+    let unsorted = builder_market(&[0x70, 0x30, 0x50]);
+
+    assert_eq!(unsorted, sorted);
+    assert_eq!(hash_market(&unsorted), hash_market(&sorted));
+    assert_eq!(market_id(&unsorted), market_id(&sorted));
+    assert_eq!(
+        encode_market_params(&unsorted),
+        encode_market_params(&sorted)
+    );
+}
+
+#[test]
+fn raw_market_build_also_sorts_collateral() {
+    let market = MarketBuilder::new(8453, token(0x10), token(0x20))
+        .collateral(token(0x70), U256::from(1u64), U256::from(1u64), token(0x71))
+        .collateral(token(0x30), U256::from(1u64), U256::from(1u64), token(0x31))
+        .build();
+    assert_eq!(
+        market
+            .collateral_params
+            .iter()
+            .map(|collateral| collateral.token)
+            .collect::<Vec<_>>(),
+        vec![token(0x30), token(0x70)]
+    );
 }

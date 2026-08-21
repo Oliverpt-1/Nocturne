@@ -37,8 +37,8 @@ pub enum BuildError {
     ExpiryNotSet,
 }
 
-/// Builder for a [`Market`]. Collateral params must be added in ascending token order (the only
-/// ordering the protocol accepts); `try_build` on the offer will flag it otherwise.
+/// Builder for a [`Market`]. Collateral parameters are sorted automatically into the ascending
+/// token order required by Midnight.
 #[derive(Clone, Debug)]
 #[must_use = "call `.build()` to produce the Market"]
 pub struct MarketBuilder {
@@ -67,7 +67,8 @@ impl MarketBuilder {
         }
     }
 
-    /// Append a collateral option. Add these in ascending `token` order.
+    /// Append a collateral option. Input order does not matter; [`build`](Self::build) sorts by
+    /// token address.
     pub fn collateral(
         mut self,
         token: Address,
@@ -109,7 +110,9 @@ impl MarketBuilder {
     }
 
     /// Produce the `Market`.
-    pub fn build(self) -> Market {
+    pub fn build(mut self) -> Market {
+        self.collateral_params
+            .sort_by_key(|collateral| collateral.token);
         Market {
             chain_id: u256_to_word(self.chain_id),
             midnight: self.midnight,
