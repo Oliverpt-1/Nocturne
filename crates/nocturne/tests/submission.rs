@@ -33,3 +33,18 @@ fn unsupported_chain_and_large_suffix_are_rejected() {
         SubmissionError::AttributionTooLarge(257)
     );
 }
+
+#[cfg(feature = "alloy-wallet")]
+#[test]
+fn alloy_request_preserves_destination_value_and_input() {
+    let transaction = mempool_submission_to([0x42; 20], [1, 2, 3], []).unwrap();
+    let request: alloy::rpc::types::TransactionRequest = transaction.into();
+    assert_eq!(
+        request.to,
+        Some(alloy::primitives::TxKind::Call(
+            alloy::primitives::Address::from_slice(&[0x42; 20])
+        ))
+    );
+    assert_eq!(request.value, Some(alloy::primitives::U256::ZERO));
+    assert_eq!(request.input.input.unwrap().as_ref(), [1, 2, 3]);
+}
