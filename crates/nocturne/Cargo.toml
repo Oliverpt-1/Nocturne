@@ -44,7 +44,7 @@ serde = { version = "1", features = ["derive"] }
 alloy-primitives = "1.6"
 alloy-sol-types = "1.6"
 flate2 = "1.1"
-alloy = { version = "1.6", optional = true }
+alloy = { version = "=1.6.1", optional = true }
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1"
