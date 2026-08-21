@@ -32,6 +32,9 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 ruint = { version = "1.12", features = ["serde"] }
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
+alloy-primitives = "1.6"
+alloy-sol-types = "1.6"
+flate2 = "1.1"
 
 [dev-dependencies]
 serde_json = "1"
