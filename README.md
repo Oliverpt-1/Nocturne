@@ -12,13 +12,12 @@
 
 ## What is Nocturne?
 
-**Nocturne** is a high-performance Rust library for building, signing, validating, and executing
-offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol.
+**Nocturne** is a high-performance Rust library for building, signing, validating, publishing, and
+executing offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol.
 
 Designed for market makers, trading firms, integrators, and protocol developers, Nocturne provides
-the off-chain infrastructure needed to quote markets, generate Merkle trees, sign offers, simulate
-execution, and interact with Midnight with minimal latency. While Midnight settles credit onchain,
-offers are created and managed offchain, where Nocturne operates.
+the infrastructure needed to quote markets, generate Merkle trees, sign offers, simulate execution,
+read the public order book, and submit wallet-ready transactions without switching languages.
 
 Every hash, signature, price calculation, and calldata layout is checked byte-for-byte against
 vectors derived from the protocol contracts (`cargo test`), and the full offer lifecycle is
@@ -47,7 +46,7 @@ Nocturne has one Rust library and one CLI built on that library:
 
 | Goal | Use |
 |---|---|
-| Build, sign, simulate, or encode Midnight integrations | [`nocturne-midnight`](crates/nocturne/README.md), imported in Rust as `nocturne` |
+| Build, sign, query, publish, or execute Midnight integrations | [`nocturne-midnight`](crates/nocturne/README.md), imported in Rust as `nocturne` |
 | Inspect and independently verify an existing payload | [`nocturne-verify`](crates/nocturne-verify/README.md) |
 
 Add the SDK to a Rust project:
