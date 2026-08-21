@@ -1,16 +1,20 @@
 [package]
-name = "nocturne"
+name = "nocturne-midnight"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.90"
 description = "Off-chain Rust SDK for Morpho Midnight: EIP-712 offer hashing, Merkle trees, signing, simulation, decoding, and calldata encoding."
 authors = ["Oliver Tipton <oliverptipton@gmail.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Oliverpt-1/midnight-rust"
-homepage = "https://github.com/Oliverpt-1/midnight-rust"
+repository = "https://github.com/Oliverpt-1/Nocturne"
+homepage = "https://github.com/Oliverpt-1/Nocturne"
 readme = "README.md"
 keywords = ["ethereum", "eip712", "morpho", "midnight", "defi"]
 categories = ["cryptography::cryptocurrencies", "finance", "encoding"]
+
+[lib]
+name = "nocturne"
+path = "src/lib.rs"
 
 # Drivers for the live e2e harness (invoked by e2e/run.sh and e2e/mm.sh). They live next to
 # their scripts rather than in examples/, which holds the SDK usage recipes.
