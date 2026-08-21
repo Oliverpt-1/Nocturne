@@ -446,8 +446,10 @@ impl OfferTree {
         while levels.last().unwrap().len() > 1 {
             let prev = levels.last().unwrap();
             let next: Vec<Word> = prev
-                .chunks_exact(2)
-                .map(|p| hash_node(&p[0], &p[1]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|[left, right]| hash_node(left, right))
                 .collect();
             levels.push(next);
         }
