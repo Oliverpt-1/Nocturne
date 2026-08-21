@@ -157,3 +157,43 @@ fn checked_market_build_rejects_invalid_collateral_structure() {
         MarketBuildError::TooManyCollateralParams(MAX_COLLATERALS + 1)
     );
 }
+
+#[test]
+fn checked_market_build_rejects_invalid_collateral_risk_parameters() {
+    let wad = U256::from(1_000_000_000_000_000_000u128);
+    let collateral = token(0x30);
+
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral(collateral, wad + U256::from(1u8), U256::ZERO, token(0x31))
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::InvalidLltv(collateral)
+    );
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral(collateral, wad, wad, token(0x31))
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::InvalidLiquidationCursor(collateral)
+    );
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral(collateral, U256::ZERO, wad - U256::from(1u8), token(0x31),)
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::InvalidMaxLif(collateral)
+    );
+    assert_eq!(
+        MarketBuilder::new(8453, token(0x10), token(0x20))
+            .collateral(
+                collateral,
+                U256::from(950_000_000_000_000_000u128),
+                U256::from(990_000_000_000_000_000u128),
+                token(0x31),
+            )
+            .build_checked()
+            .unwrap_err(),
+        MarketBuildError::MaxLifTooHigh(collateral)
+    );
+}

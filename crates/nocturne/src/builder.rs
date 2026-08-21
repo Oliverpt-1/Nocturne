@@ -6,9 +6,9 @@
 //! [`validate_offer`](crate::validate_offer) so a malformed offer never leaves the builder.
 
 use crate::{
-    apr_to_tick, buyer_assets_to_units, seller_assets_to_units, u256_to_word, validate_offer,
-    word_from_u64, word_to_u256, Address, CollateralParams, Market, Offer, OfferError, SimError,
-    SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, MAX_CONTINUOUS_FEE, U256,
+    apr_to_tick, buyer_assets_to_units, max_lif, seller_assets_to_units, u256_to_word,
+    validate_offer, word_from_u64, word_to_u256, Address, CollateralParams, Market, Offer,
+    OfferError, SimError, SizingError, ValidateCtx, Word, DEFAULT_TICK_SPACING, U256,
 };
 
 /// A builder-usage error surfaced at [`build_checked`](OfferBuilder::build_checked) time: either a
@@ -52,6 +52,18 @@ pub enum MarketBuildError {
     /// Each collateral token may appear only once.
     #[error("duplicate collateral token: {0:?}")]
     DuplicateCollateralToken(Address),
+    /// LLTV must be in the closed interval `[0, WAD]`.
+    #[error("collateral {0:?} has an LLTV above WAD")]
+    InvalidLltv(Address),
+    /// Liquidation cursor must be in the half-open interval `[0, WAD)`.
+    #[error("collateral {0:?} has a liquidation cursor at or above WAD")]
+    InvalidLiquidationCursor(Address),
+    /// The collateral's computed maximum liquidation incentive factor exceeds `2 * WAD`.
+    #[error("collateral {0:?} has an invalid maximum liquidation incentive factor")]
+    InvalidMaxLif(Address),
+    /// The LLTV and maximum liquidation incentive factor violate the protocol product bound.
+    #[error("collateral {0:?} violates the LLTV/maximum-LIF product bound")]
+    MaxLifTooHigh(Address),
 }
 
 /// Builder for a [`Market`]. Collateral parameters are sorted automatically into the ascending
@@ -168,6 +180,27 @@ impl MarketBuilder {
         {
             return Err(MarketBuildError::DuplicateCollateralToken(pair[0].token));
         }
+        let wad = U256::from(1_000_000_000_000_000_000u128);
+        let max_product = U256::from(999_000_000_000_000_000u128) * wad;
+        for collateral in &market.collateral_params {
+            let lltv = word_to_u256(&collateral.lltv);
+            let cursor = word_to_u256(&collateral.liquidation_cursor);
+            if lltv > wad {
+                return Err(MarketBuildError::InvalidLltv(collateral.token));
+            }
+            if cursor >= wad {
+                return Err(MarketBuildError::InvalidLiquidationCursor(collateral.token));
+            }
+            let Some(max_lif) = max_lif(lltv, cursor) else {
+                return Err(MarketBuildError::InvalidMaxLif(collateral.token));
+            };
+            if max_lif > U256::from(2u8) * wad {
+                return Err(MarketBuildError::InvalidMaxLif(collateral.token));
+            }
+            if lltv != wad && lltv * max_lif > max_product {
+                return Err(MarketBuildError::MaxLifTooHigh(collateral.token));
+            }
+        }
         Ok(market)
     }
 }
@@ -175,7 +208,7 @@ impl MarketBuilder {
 /// Builder for an [`Offer`].
 ///
 /// Defaults: `start = 0`, no callback, `reduce_only = false`, and
-/// `continuous_fee_cap = MAX_CONTINUOUS_FEE`. You must set a side, tick, expiry, ratifier, and
+/// `continuous_fee_cap = 0` (fail closed until the maker explicitly accepts a fee). You must set a side, tick, expiry, ratifier, and
 /// exactly one of [`max_units`](Self::max_units) / [`max_assets`](Self::max_assets).
 /// [`try_build`](Self::try_build) and [`build_checked`](Self::build_checked) reject an offer whose
 /// side or tick was never set: relying on the defaults would sign a buy offer (in `take` the maker
@@ -232,7 +265,7 @@ impl OfferBuilder {
             reduce_only: false,
             max_units: 0,
             max_assets: 0,
-            continuous_fee_cap: U256::from(MAX_CONTINUOUS_FEE),
+            continuous_fee_cap: U256::ZERO,
             error: None,
         }
     }

@@ -67,13 +67,36 @@ fn defaults_are_sane() {
     assert!(offer.buy);
     assert_eq!(word_to_u128(&offer.start), Some(0));
     assert_eq!(word_to_u256(&offer.expiry), U256::ZERO);
-    assert_eq!(
-        word_to_u256(&offer.continuous_fee_cap),
-        U256::from(MAX_CONTINUOUS_FEE)
-    );
+    assert_eq!(word_to_u256(&offer.continuous_fee_cap), U256::ZERO);
     assert!(!offer.reduce_only);
     assert!(offer.callback_data.is_empty());
     assert_eq!(offer.receiver_if_maker_is_seller, [0u8; 20]);
+}
+
+#[test]
+fn default_fee_cap_fails_closed_against_a_nonzero_market_fee() {
+    let result = OfferBuilder::new(a_market(), [0x55; 20])
+        .buy()
+        .tick(8)
+        .start(1_000)
+        .expiry(2_000_000_000)
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .try_build(&ctx());
+    assert!(result
+        .unwrap_err()
+        .contains(&OfferError::ContinuousFeeAboveOfferCap));
+
+    assert!(OfferBuilder::new(a_market(), [0x55; 20])
+        .buy()
+        .tick(8)
+        .start(1_000)
+        .expiry(2_000_000_000)
+        .ratifier(RATIFIER)
+        .max_units(1)
+        .continuous_fee_cap(U256::from(100u64))
+        .try_build(&ctx())
+        .is_ok());
 }
 
 #[test]

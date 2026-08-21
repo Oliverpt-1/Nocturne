@@ -168,7 +168,7 @@ pub fn can_consume(offer: &Offer, consumed_so_far: u128, amount: u128) -> bool {
 /// WAD))`, every division rounding down. `None` where the Solidity computation reverts under 0.8
 /// checked arithmetic: `lltv > WAD` underflows `WAD - lltv`, a huge cursor overflows the inner
 /// product or underflows the denominator, and a denominator of exactly zero divides by zero.
-fn max_lif(lltv: U256, cursor: U256) -> Option<U256> {
+pub(crate) fn max_lif(lltv: U256, cursor: U256) -> Option<U256> {
     let wad = U256::from(WAD);
     let inner = cursor.checked_mul(wad.checked_sub(lltv)?)? / wad;
     (wad * wad).checked_div(wad.checked_sub(inner)?)
@@ -275,6 +275,20 @@ pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
         }
     }
 
+    // Offer creation defaults to the protocol's default spacing. A hydrated market snapshot
+    // overrides it after market governance changes the spacing.
+    let tick_spacing = ctx
+        .market
+        .map(|market| market.tick_spacing)
+        .unwrap_or(DEFAULT_TICK_SPACING);
+    if tick_spacing == 0 || DEFAULT_TICK_SPACING % tick_spacing != 0 {
+        errs.push(OfferError::TickNotAccessible);
+    } else if let Some(tick) = word_to_u128(&offer.tick) {
+        if tick % u128::from(tick_spacing) != 0 {
+            errs.push(OfferError::TickNotAccessible);
+        }
+    }
+
     // ---- context: market snapshot ----
     if let Some(m) = ctx.market {
         if m.loss_factor_maxed {
@@ -282,14 +296,6 @@ pub fn validate_offer(offer: &Offer, ctx: &ValidateCtx) -> Vec<OfferError> {
         }
         if w128(m.continuous_fee) > offer.continuous_fee_cap {
             errs.push(OfferError::ContinuousFeeAboveOfferCap);
-        }
-        // Only meaningful when the tick itself is in range and spacing is set.
-        if m.tick_spacing > 0 {
-            if let Some(tick) = word_to_u128(&offer.tick) {
-                if tick % m.tick_spacing as u128 != 0 {
-                    errs.push(OfferError::TickNotAccessible);
-                }
-            }
         }
     }
 
