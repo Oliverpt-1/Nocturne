@@ -1,11 +1,15 @@
 //! End-to-end CLI tests: build a real signed payload with the library, then drive the compiled
 //! `nocturne-verify` binary over it and assert on its output and exit codes.
 
-use std::process::Command;
+use std::{
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use nocturne::*;
 
 const BIN: &str = env!("CARGO_BIN_EXE_nocturne-verify");
+static NEXT_TEMP_NONCE: AtomicU64 = AtomicU64::new(0);
 
 fn offer_for(maker: Address) -> Offer {
     Offer {
@@ -633,11 +637,12 @@ fn ratify_fixture() -> (String, [String; 2], String) {
     let mut offers = [offer_for(maker), offer_for(maker)];
     offers[1].tick = word_from_u64(3376);
     let dir = std::env::temp_dir();
+    let nonce = NEXT_TEMP_NONCE.fetch_add(1, Ordering::Relaxed);
     let mut paths = Vec::new();
     for (i, o) in offers.iter().enumerate() {
         let p = dir.join(format!(
-            "nocturne_ratify_offer_{}_{i}.json",
-            std::process::id()
+            "nocturne_ratify_offer_{}_{nonce}_{i}.json",
+            std::process::id(),
         ));
         std::fs::write(&p, serde_json::to_string(o).unwrap()).unwrap();
         paths.push(p.to_str().unwrap().to_string());
@@ -676,8 +681,8 @@ fn verify_ratify_without_offers_is_partial() {
 #[test]
 fn verify_ratify_with_matching_offers_passes() {
     let (payload, paths, _root) = ratify_fixture();
-    let (stdout, _err, code) = run(&["verify", &payload, "--offers", &paths[0], &paths[1]]);
-    assert_eq!(code, 0, "{stdout}");
+    let (stdout, stderr, code) = run(&["verify", &payload, "--offers", &paths[0], &paths[1]]);
+    assert_eq!(code, 0, "stdout:\n{stdout}\nstderr:\n{stderr}");
     assert!(
         stdout.contains("[PASS] root commits to exactly the supplied offers"),
         "{stdout}"
@@ -689,8 +694,8 @@ fn verify_ratify_with_matching_offers_passes() {
 fn verify_ratify_with_wrong_offers_fails() {
     // Same offers, wrong order: different leaf indices, different root.
     let (payload, paths, _root) = ratify_fixture();
-    let (stdout, _err, code) = run(&["verify", &payload, "--offers", &paths[1], &paths[0]]);
-    assert_eq!(code, 1, "{stdout}");
+    let (stdout, stderr, code) = run(&["verify", &payload, "--offers", &paths[1], &paths[0]]);
+    assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
     assert!(stdout.contains("RESULT: FAIL"), "{stdout}");
 }
 
