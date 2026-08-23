@@ -4,40 +4,52 @@ use k256::ecdsa::{RecoveryId, Signature as EcdsaSig, SigningKey, VerifyingKey};
 use std::collections::HashSet;
 use tiny_keccak::{Hasher, Keccak};
 
-mod convert;
+/// Primitive conversions between Rust, ABI words, and `U256` values.
+pub mod convert;
 pub use convert::*;
 
-mod builder;
+/// Checked market and offer construction.
+pub mod builder;
 pub use builder::*;
 
-mod validate;
+/// Local offer validation and consumption-cap checks.
+pub mod validate;
 pub use validate::*;
 
-mod sim;
+/// Tick, APR, fee, amount, and take-execution simulation.
+pub mod sim;
 pub use sim::*;
 
-mod decode;
+/// Typed decoding for Midnight state, calldata, ratifiers, and bundles.
+pub mod decode;
 pub use decode::*;
 
-mod codec;
+/// ABI encoding for take, bundle, cancellation, and ratification calls.
+pub mod codec;
 pub use codec::*;
 
-mod signer;
+/// Local and external signing backends.
+pub mod signer;
 pub use signer::*;
 
-mod authorize;
+/// EIP-712 signing for delegated Midnight authorization.
+pub mod authorize;
 pub use authorize::*;
 
-mod sizing;
+/// Offer capacity and asset-to-unit sizing helpers.
+pub mod sizing;
 pub use sizing::*;
 
-mod payload;
+/// Versioned maker-offer mempool payload encoding and decoding.
+pub mod payload;
 pub use payload::*;
 
-mod submission;
+/// Wallet-agnostic maker-offer publication transactions.
+pub mod submission;
 pub use submission::*;
 
-mod api;
+/// Async Midnight order-book, quote, maker-offer, and validation client.
+pub mod api;
 pub use api::*;
 
 /// Errors from constructing a Merkle tree over offer leaves.

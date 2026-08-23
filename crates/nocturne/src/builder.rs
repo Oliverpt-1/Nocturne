@@ -3,7 +3,7 @@
 //! The wire structs store every `uint256` as a raw big-endian `Word`, which is easy to get
 //! wrong by hand. These builders take typed inputs (`u64` / `u128` / [`U256`] / `Address`),
 //! apply sensible defaults, and pack the `Word`s for you. `try_build` additionally runs
-//! [`validate_offer`](crate::validate_offer) so a malformed offer never leaves the builder.
+//! [`validate_offer`] so a malformed offer never leaves the builder.
 
 use crate::{
     apr_to_tick, buyer_assets_to_units, max_lif, seller_assets_to_units, u256_to_word,
@@ -17,10 +17,10 @@ use crate::{
 /// tick) that was never set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BuildError {
-    /// An APR→tick conversion failed (see [`apr_to_tick`](crate::apr_to_tick)).
+    /// An APR→tick conversion failed (see [`apr_to_tick`]).
     #[error(transparent)]
     Sim(#[from] SimError),
-    /// An assets→units conversion failed (see [`buyer_assets_to_units`](crate::buyer_assets_to_units)).
+    /// An assets→units conversion failed (see [`buyer_assets_to_units`]).
     #[error(transparent)]
     Sizing(#[from] SizingError),
     /// The computed unit count does not fit in the `u128` `maxUnits` field.
@@ -389,7 +389,7 @@ impl OfferBuilder {
     /// Set the tick from a target **simple annualized APR** (percent, e.g. `7.2` = 7.2%).
     ///
     /// Computes the time-to-maturity as `market.maturity - now` and converts via
-    /// [`apr_to_tick`](crate::apr_to_tick) at [`DEFAULT_TICK_SPACING`], snapping to the lowest
+    /// [`apr_to_tick`] at [`DEFAULT_TICK_SPACING`], snapping to the lowest
     /// accessible tick whose price is `>=` the target (so the realized APR is `<=` `apr_pct`).
     ///
     /// Never panics: any conversion error is stored and surfaced by
@@ -413,8 +413,8 @@ impl OfferBuilder {
     /// Set [`max_units`](Self::max_units) from a target **asset** (notional) amount.
     ///
     /// Sizes the maker's side: for a buy offer the maker is the buyer
-    /// ([`buyer_assets_to_units`](crate::buyer_assets_to_units)); for a sell offer the maker is the
-    /// seller ([`seller_assets_to_units`](crate::seller_assets_to_units)). `cbps` are the market's
+    /// ([`buyer_assets_to_units`]); for a sell offer the maker is the seller
+    /// ([`seller_assets_to_units`]). `cbps` are the market's
     /// `settlementFeeCbp0..6`. Set the tick (via [`tick`](Self::tick) or [`apr`](Self::apr)) first,
     /// since sizing depends on the price.
     ///
