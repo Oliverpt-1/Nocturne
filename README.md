@@ -10,7 +10,7 @@
   <a href="crates/nocturne/README.md">SDK Guide</a> |
   <a href="https://docs.rs/nocturne-midnight">API Docs</a> |
   <a href="crates/nocturne/examples/README.md">Examples</a> |
-  <a href="crates/nocturne-verify/README.md">Verifier CLI</a>
+  <a href="crates/nocturne-verify/README.md">CLI Guide</a>
 </p>
 
 <p align="center">
@@ -20,16 +20,12 @@
 ## What is Nocturne?
 
 Nocturne lets Rust applications build, validate, sign, publish, discover, simulate, and take
-offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It contains two
-separate tools:
+offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol:
 
 | Product | Use it to |
 |---|---|
 | `nocturne` SDK | Build integrations: create and publish maker offers, fetch books and quotes, simulate fills, and submit transactions |
 | `nocturne-verify` CLI | Independently inspect existing calldata, payloads, and typed-data requests before signing or submitting them |
-
-The verifier is optional. Applications depend on the SDK; humans and signing systems can use the
-CLI as a separate review step.
 
 ## Status
 
@@ -44,7 +40,6 @@ The crates.io package and Rust import intentionally have different names:
 |---|---|
 | crates.io SDK package | `nocturne-midnight` |
 | Rust import | `nocturne` |
-| Verification binary | `nocturne-verify` |
 
 Add the SDK to a Rust application:
 
@@ -53,7 +48,7 @@ Add the SDK to a Rust application:
 nocturne = { package = "nocturne-midnight", version = "0.1.0" }
 ```
 
-Install the separate verifier CLI:
+Install the CLI:
 
 ```sh
 cargo install nocturne-verify
@@ -74,7 +69,7 @@ flowchart LR
     I --> J[Encode take calldata]
     J --> K[Submit with Rust wallet]
 
-    D -. inspect .-> V[nocturne-verify]
+    D -. inspect .-> V[Offline review]
     E -. inspect .-> V
     J -. inspect .-> V
 ```
@@ -85,7 +80,7 @@ flowchart LR
 
 Start with the [SDK quickstart and complete workflows](crates/nocturne/README.md). Every example and
 its exact Cargo command are listed in the [examples index](crates/nocturne/examples/README.md).
-The [verifier guide](crates/nocturne-verify/README.md) stands alone for CLI users.
+CLI commands are documented in the [CLI guide](crates/nocturne-verify/README.md).
 
 ## Development and verification
 

@@ -47,6 +47,6 @@ engineering tool, not a protocol performance guarantee.
 
 ## Live contract coverage
 
-The examples above teach individual SDK workflows. The separate
+The examples above teach individual SDK workflows. The
 [maintainer E2E harness](../e2e/README.md) deploys real Midnight contracts to Anvil and proves that
 the complete artifacts are accepted on-chain. Integrators do not need the harness to use the SDK.

@@ -4,9 +4,6 @@ Rust SDK for building complete [Morpho Midnight](https://github.com/morpho-org/m
 integrations: construct and publish maker offers, fetch books and quotes, size and simulate fills,
 and produce transactions that a Rust wallet can submit.
 
-`nocturne-verify` is a separate, optional command-line tool for inspecting data produced by an
-application or wallet. It is not required to use this SDK.
-
 ## Installation and names
 
 The published package is named `nocturne-midnight`, while Rust code imports it as `nocturne`:
@@ -255,7 +252,6 @@ Never log private keys or signer internals. `LocalSigner` deliberately omits key
 | Simulate execution | `simulate_take`, `take_amounts` |
 | Build take, cancel, or ratification calldata | `encode_*` helpers |
 | Decode calldata and state | `decode_*` helpers |
-| Independently inspect external data | separate `nocturne-verify` CLI |
 
 ## Errors and safety boundaries
 
@@ -301,12 +297,6 @@ for exact Cargo commands and
 - **Publish:** submit maker-offer payload bytes to the Midnight mempool.
 - **Take:** execute an offer against the Midnight contract.
 - **Verify:** independently reproduce and inspect what will be signed or submitted.
-
-## SDK and verifier boundary
-
-The SDK creates integration artifacts and wallet-ready transactions. The separate
-[`nocturne-verify`](https://github.com/Oliverpt-1/Nocturne/tree/main/crates/nocturne-verify) CLI is
-read-only: it inspects existing bytes or typed data and never creates or submits a transaction.
 
 ## Security
 
