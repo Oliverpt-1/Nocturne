@@ -5,7 +5,7 @@
 //! in the head and their contents appended to the tail. Parity is asserted in `tests/codec.rs`
 //! against constants produced by `fixtures/GenCodec.t.sol` run against the Midnight contracts.
 
-use crate::{Address, Offer, Sig, Word, U256};
+use crate::{Address, Market, Offer, Sig, Word, U256};
 
 // ---- 4-byte function selectors, baked from `fixtures/GenCodec.t.sol` ----
 
@@ -16,6 +16,16 @@ pub const CANCEL_ROOT_SELECTOR: [u8; 4] = [0xbb, 0x1f, 0x12, 0xaa];
 /// `SetterRatifier.setIsRootRatified(address,bytes32,bool)` selector (`cast sig`-derived and
 /// cross-checked against a production ratification transaction on Base).
 pub const SET_IS_ROOT_RATIFIED_SELECTOR: [u8; 4] = [0x2f, 0xd0, 0xe4, 0x5d];
+/// `Midnight.supplyCollateral(Market,uint256,uint256,address)` selector.
+pub const SUPPLY_COLLATERAL_SELECTOR: [u8; 4] = [0x32, 0x29, 0x2d, 0x96];
+/// `Midnight.withdraw(Market,uint256,address,address)` selector.
+pub const WITHDRAW_SELECTOR: [u8; 4] = [0xa6, 0xdb, 0x17, 0x50];
+/// `Midnight.setIsAuthorized(address,bool,address)` selector.
+pub const SET_IS_AUTHORIZED_SELECTOR: [u8; 4] = [0xb7, 0x82, 0x12, 0xab];
+/// `IERC20.approve(address,uint256)` selector.
+pub const ERC20_APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
+/// `MidnightBundlesV1.midnightBundlesV1RepayAndWithdrawCollateral(...)` selector.
+pub const BUNDLE_REPAY_WITHDRAW_SELECTOR: [u8; 4] = [0x7f, 0x19, 0xab, 0xac];
 
 // `IMidnightBundlesV1` fill-function selectors, derived with `cast sig` from the vendored
 // interface (morpho-apps `IMidnightBundles.sol`); the BuyWithAssetsTarget selector is also
@@ -200,6 +210,14 @@ pub fn encode_market_params(market: &crate::Market) -> Vec<u8> {
     encode_sequence(&[market_value(market)])
 }
 
+fn selector_call(selector: [u8; 4], args: &[Value]) -> Vec<u8> {
+    let encoded = encode_sequence(args);
+    let mut out = Vec::with_capacity(4 + encoded.len());
+    out.extend_from_slice(&selector);
+    out.extend(encoded);
+    out
+}
+
 /// `abi.encode(Signature{uint8 v, bytes32 r, bytes32 s}, bytes32 root, uint256 leafIndex,
 /// bytes32[] proof)` - the `ratifierData` consumed by `EcrecoverRatifier.isRatified`.
 ///
@@ -347,6 +365,113 @@ pub fn encode_bundle_calldata(b: &crate::BundleCall) -> Vec<u8> {
     out.extend_from_slice(&b.kind.selector());
     out.extend(encoded);
     out
+}
+
+/// Encode `Midnight.supplyCollateral(market, collateralIndex, assets, onBehalf)`.
+pub fn encode_supply_collateral_calldata(
+    market: &Market,
+    collateral_index: U256,
+    assets: U256,
+    on_behalf: &Address,
+) -> Vec<u8> {
+    selector_call(
+        SUPPLY_COLLATERAL_SELECTOR,
+        &[
+            market_value(market),
+            Value::Word(collateral_index.to_be_bytes::<32>()),
+            Value::Word(assets.to_be_bytes::<32>()),
+            Value::Word(addr_word(on_behalf)),
+        ],
+    )
+}
+
+/// Encode `Midnight.withdraw(market, units, onBehalf, receiver)` for credit redemption.
+pub fn encode_withdraw_calldata(
+    market: &Market,
+    units: U256,
+    on_behalf: &Address,
+    receiver: &Address,
+) -> Vec<u8> {
+    selector_call(
+        WITHDRAW_SELECTOR,
+        &[
+            market_value(market),
+            Value::Word(units.to_be_bytes::<32>()),
+            Value::Word(addr_word(on_behalf)),
+            Value::Word(addr_word(receiver)),
+        ],
+    )
+}
+
+/// Encode `Midnight.setIsAuthorized(authorized, newIsAuthorized, onBehalf)`.
+pub fn encode_set_is_authorized_calldata(
+    authorized: &Address,
+    is_authorized: bool,
+    on_behalf: &Address,
+) -> Vec<u8> {
+    selector_call(
+        SET_IS_AUTHORIZED_SELECTOR,
+        &[
+            Value::Word(addr_word(authorized)),
+            Value::Word(bool_word(is_authorized)),
+            Value::Word(addr_word(on_behalf)),
+        ],
+    )
+}
+
+/// Encode the standard ERC-20 `approve(spender, amount)` call.
+pub fn encode_erc20_approve_calldata(spender: &Address, amount: U256) -> Vec<u8> {
+    selector_call(
+        ERC20_APPROVE_SELECTOR,
+        &[
+            Value::Word(addr_word(spender)),
+            Value::Word(amount.to_be_bytes::<32>()),
+        ],
+    )
+}
+
+/// Encode the fixed MidnightBundles V1 repay-and-withdraw workflow.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_repay_withdraw_collateral_calldata(
+    market: &Market,
+    repay_assets: U256,
+    on_behalf: &Address,
+    loan_token_permit: &crate::TokenPermit,
+    collateral_withdrawals: &[crate::CollateralWithdrawal],
+    collateral_receiver: &Address,
+    referral_fee_pct: U256,
+    referral_fee_recipient: &Address,
+    deadline: U256,
+) -> Vec<u8> {
+    let permit = Value::Tuple(vec![
+        Value::Word(usize_word(loan_token_permit.kind as usize)),
+        Value::Bytes(loan_token_permit.data.clone()),
+    ]);
+    let withdrawals = Value::Array(
+        collateral_withdrawals
+            .iter()
+            .map(|withdrawal| {
+                Value::Tuple(vec![
+                    Value::Word(withdrawal.collateral_index.to_be_bytes::<32>()),
+                    Value::Word(withdrawal.assets.to_be_bytes::<32>()),
+                ])
+            })
+            .collect(),
+    );
+    selector_call(
+        BUNDLE_REPAY_WITHDRAW_SELECTOR,
+        &[
+            market_value(market),
+            Value::Word(repay_assets.to_be_bytes::<32>()),
+            Value::Word(addr_word(on_behalf)),
+            permit,
+            withdrawals,
+            Value::Word(addr_word(collateral_receiver)),
+            Value::Word(referral_fee_pct.to_be_bytes::<32>()),
+            Value::Word(addr_word(referral_fee_recipient)),
+            Value::Word(deadline.to_be_bytes::<32>()),
+        ],
+    )
 }
 
 /// `EcrecoverRatifier.cancelRoot.selector ++ abi.encode(maker, root)`.

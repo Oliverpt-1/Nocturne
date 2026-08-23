@@ -48,6 +48,14 @@ pub use payload::*;
 pub mod submission;
 pub use submission::*;
 
+/// Wallet-agnostic collateral, take, repayment, redemption, and authorization actions.
+pub mod actions;
+pub use actions::*;
+
+/// Approval and Midnight-authorization requirement planning and discovery.
+pub mod requirements;
+pub use requirements::*;
+
 /// Async Midnight order-book, quote, maker-offer, and validation client.
 pub mod api;
 pub use api::*;
