@@ -4,9 +4,10 @@ This directory is Nocturne's live protocol-compatibility harness. **Integrators 
 use the SDK.** It exists for maintainers changing hashes, codecs, math, validation, submission, or
 contract-facing workflows.
 
-The harness deploys real `Midnight`, `EcrecoverRatifier`, `EcrecoverAuthorizer`, ERC-20, and oracle
-contracts to a fresh Anvil node. No contract stub accepts Nocturne output on faith: the deployed
-contracts execute the SDK-produced signatures, proofs, and calldata.
+The harness deploys real `Midnight`, `MidnightBundlesV1`, `EcrecoverRatifier`,
+`EcrecoverAuthorizer`, ERC-20, and oracle contracts to a fresh Anvil node. No contract stub accepts
+Nocturne output on faith: the deployed contracts execute the SDK-produced signatures, proofs, and
+calldata.
 
 ## Requirements
 
@@ -14,6 +15,7 @@ contracts execute the SDK-produced signatures, proofs, and calldata.
 - Foundry commands `anvil`, `forge`, `cast` on `PATH`.
 - An otherwise idle local port `8545`.
 - A compatible `morpho-org/midnight` checkout. The last validated revision is `e6f2bf28`.
+- A compatible `morpho-org/bundler3` checkout. The last validated revision is `9c457e9`.
 
 The scripts temporarily copy one deployment script into `<MIDNIGHT_REPO>/script`, refuse to
 overwrite an existing file, and remove the copy on exit. Generated Foundry broadcast data is
@@ -24,7 +26,9 @@ written under this workspace's `target/` directory.
 From the Nocturne repository root:
 
 ```sh
-MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/run.sh
+MIDNIGHT_REPO=/path/to/midnight \
+BUNDLES_REPO=/path/to/bundler3 \
+crates/nocturne/e2e/run.sh
 ```
 
 The lifecycle proves:
@@ -38,8 +42,13 @@ The lifecycle proves:
    `simulate_take` predictions.
 6. A take sized with `seller_assets_to_units` yields the predicted target assets.
 7. An inaccessible tick is rejected both by `validate_offer` and the contract.
-8. Decoded market and position views match live contract getters.
-9. SDK-built cancellation calldata invalidates the root and prevents another take.
+8. Live RPC discovery finds missing token approval and bundle authorization, then clears both after
+   the generated prerequisite transactions execute.
+9. Direct collateral supply and atomic collateral-supply-plus-borrow calldata execute with exact
+   expected token, debt, and collateral deltas.
+10. A full repayment withdraws all borrower collateral, and redemption transfers all maker credit.
+11. Decoded market and position views match live contract getters.
+12. SDK-built cancellation calldata invalidates the root and prevents another take.
 
 The runner prints one `PASS` per assertion and exits non-zero on the first mismatch.
 

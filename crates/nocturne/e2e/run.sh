@@ -9,10 +9,12 @@ RPC=http://127.0.0.1:8545
 PK0=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   # taker/seller
 PK1=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d   # maker/lender
 ACCOUNT0=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+ACCOUNT1=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
 GROUP=0x0000000000000000000000000000000000000000000000000000000000000001
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
 MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a compatible morpho-org/midnight checkout (last validated: e6f2bf28)}"
+BUNDLE_DIR="${BUNDLES_REPO:?set BUNDLES_REPO to a compatible morpho-org/bundler3 checkout (last validated: 9c457e9)}"
 SCRIPT_DIR="$MID/script"
 DEPLOY_SCRIPT="$SCRIPT_DIR/DeployE2E.s.sol"
 CREATED_SCRIPT_DIR=0
@@ -51,6 +53,15 @@ export MIDNIGHT=$(getaddr MIDNIGHT) RATIFIER=$(getaddr RATIFIER) AUTHORIZER=$(ge
 export LOAN=$(getaddr LOAN) COLLATERAL=$(getaddr COLLATERAL) ORACLE=$(getaddr ORACLE)
 MARKET_ID=$(grep -E "^  MARKET_ID " <<<"$DEPLOY" | awk '{print $2}')
 ok "deployed real Midnight at $MIDNIGHT (market $MARKET_ID)"
+
+if ! BUNDLE_DEPLOY=$(cd "$BUNDLE_DIR" && forge create src/midnight/MidnightBundlesV1.sol:MidnightBundlesV1 \
+  --rpc-url "$RPC" --private-key "$PK0" --broadcast --constructor-args "$MIDNIGHT" 2>&1); then
+  echo "$BUNDLE_DEPLOY" >&2
+  fail "deploy MidnightBundlesV1"
+fi
+export BUNDLES=$(grep -E 'Deployed to:' <<<"$BUNDLE_DEPLOY" | tail -1 | awk '{print $3}')
+[ -n "$BUNDLES" ] || fail "could not read MidnightBundlesV1 deployment address"
+eq "bundle points to deployed Midnight" "$(cast call "$BUNDLES" 'MIDNIGHT()(address)' --rpc-url "$RPC")" "$MIDNIGHT"
 
 echo "== 2. run the Rust tools (build/sign/authorize/encode/simulate) =="
 GEN=$(cd "$CRATE" && cargo run --quiet --example e2e -- gen)
@@ -92,7 +103,60 @@ else
   ok "bad-tick take reverted on-chain (as validate_offer predicted)"
 fi
 
-echo "== 6. decode real on-chain state with the decoder tool =="
+echo "== 6. complete position lifecycle through SDK action builders =="
+ACTIONS=$(cd "$CRATE" && cargo run --quiet --example e2e -- gen-actions)
+ag() { grep -E "^$1 " <<<"$ACTIONS" | awk '{print $2}'; }
+
+DIRECT_COLLATERAL_BEFORE=$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC" | awk '{print $1}')
+cast send "$COLLATERAL" 'mint(address,uint256)' "$ACCOUNT0" "$(ag ACTION_COLLATERAL_SUPPLY)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+cast send "$COLLATERAL" 'approve(address,uint256)' "$MIDNIGHT" "$(ag ACTION_COLLATERAL_SUPPLY)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+cast send "$MIDNIGHT" "$(ag SUPPLY_CALLDATA)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+DIRECT_COLLATERAL_AFTER=$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC" | awk '{print $1}')
+eq "direct collateral supply" "$((DIRECT_COLLATERAL_AFTER - DIRECT_COLLATERAL_BEFORE))" "$(ag ACTION_COLLATERAL_SUPPLY)"
+
+REQ_BEFORE=$(cd "$CRATE" && cargo run --quiet --features alloy-wallet --example requirements_e2e)
+eq "discovery found collateral approval" "$(grep '^APPROVAL_COUNT ' <<<"$REQ_BEFORE" | awk '{print $2}')" "1"
+eq "discovery found bundle authorization" "$(grep '^AUTHORIZATION_COUNT ' <<<"$REQ_BEFORE" | awk '{print $2}')" "1"
+
+cast send "$COLLATERAL" 'mint(address,uint256)' "$ACCOUNT0" "$(ag BUNDLE_COLLATERAL_SUPPLY)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+cast send "$COLLATERAL" 'approve(address,uint256)' "$BUNDLES" "$(ag BUNDLE_COLLATERAL_SUPPLY)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+cast send "$MIDNIGHT" "$(ag AUTH_BUNDLES_CALLDATA)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+REQ_AFTER=$(cd "$CRATE" && cargo run --quiet --features alloy-wallet --example requirements_e2e)
+eq "discovery clears satisfied requirements" "$(grep '^REQUIREMENT_COUNT ' <<<"$REQ_AFTER" | awk '{print $2}')" "0"
+
+BUNDLE_LOAN_BEFORE=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+BUNDLE_DEBT_BEFORE=$(cast call "$MIDNIGHT" 'debt(bytes32,address)(uint128)' "$MARKET_ID" "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+BUNDLE_COLLATERAL_BEFORE=$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC" | awk '{print $1}')
+cast send "$BUNDLES" "$(ag BORROW_BUNDLE_CALLDATA)" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+BUNDLE_LOAN_AFTER=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+BUNDLE_DEBT_AFTER=$(cast call "$MIDNIGHT" 'debt(bytes32,address)(uint128)' "$MARKET_ID" "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+BUNDLE_COLLATERAL_AFTER=$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC" | awk '{print $1}')
+eq "atomic borrow loan assets" "$((BUNDLE_LOAN_AFTER - BUNDLE_LOAN_BEFORE))" "$(ag BUNDLE_BORROW_ASSETS)"
+eq "atomic borrow debt units" "$((BUNDLE_DEBT_AFTER - BUNDLE_DEBT_BEFORE))" "$(ag BUNDLE_BORROW_UNITS)"
+eq "atomic borrow collateral supply" "$((BUNDLE_COLLATERAL_AFTER - BUNDLE_COLLATERAL_BEFORE))" "$(ag BUNDLE_COLLATERAL_SUPPLY)"
+
+TOTAL_DEBT=$(cast call "$MIDNIGHT" 'debt(bytes32,address)(uint128)' "$MARKET_ID" "$ACCOUNT0" --rpc-url "$RPC" | awk '{print $1}')
+TOTAL_COLLATERAL=$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC" | awk '{print $1}')
+cast send "$LOAN" 'mint(address,uint256)' "$ACCOUNT0" "$TOTAL_DEBT" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+cast send "$LOAN" 'approve(address,uint256)' "$BUNDLES" "$TOTAL_DEBT" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+REPAY=$(cd "$CRATE" && cargo run --quiet --example e2e -- gen-repay "$TOTAL_DEBT" "$TOTAL_COLLATERAL")
+REPAY_CALLDATA=$(grep '^REPAY_WITHDRAW_CALLDATA ' <<<"$REPAY" | awk '{print $2}')
+cast send "$BUNDLES" "$REPAY_CALLDATA" --rpc-url "$RPC" --private-key "$PK0" >/dev/null
+eq "full debt repayment" "$(cast call "$MIDNIGHT" 'debt(bytes32,address)(uint128)' "$MARKET_ID" "$ACCOUNT0" --rpc-url "$RPC")" "0"
+eq "full collateral withdrawal" "$(cast call "$MIDNIGHT" 'collateral(bytes32,address,uint256)(uint128)' "$MARKET_ID" "$ACCOUNT0" 0 --rpc-url "$RPC")" "0"
+
+MAKER_CREDIT=$(cast call "$MIDNIGHT" 'credit(bytes32,address)(uint128)' "$MARKET_ID" "$MAKER" --rpc-url "$RPC" | awk '{print $1}')
+WITHDRAWABLE=$(cast call "$MIDNIGHT" 'withdrawable(bytes32)(uint128)' "$MARKET_ID" --rpc-url "$RPC" | awk '{print $1}')
+[ "$WITHDRAWABLE" -ge "$MAKER_CREDIT" ] || fail "repayment left insufficient assets to redeem maker credit"
+REDEEM=$(cd "$CRATE" && cargo run --quiet --example e2e -- gen-redeem "$MAKER_CREDIT")
+REDEEM_CALLDATA=$(grep '^REDEEM_CALLDATA ' <<<"$REDEEM" | awk '{print $2}')
+MAKER_LOAN_BEFORE=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT1" --rpc-url "$RPC" | awk '{print $1}')
+cast send "$MIDNIGHT" "$REDEEM_CALLDATA" --rpc-url "$RPC" --private-key "$PK1" >/dev/null
+MAKER_LOAN_AFTER=$(cast call "$LOAN" 'balanceOf(address)(uint256)' "$ACCOUNT1" --rpc-url "$RPC" | awk '{print $1}')
+eq "maker redeemed all credit" "$(cast call "$MIDNIGHT" 'credit(bytes32,address)(uint128)' "$MARKET_ID" "$MAKER" --rpc-url "$RPC")" "0"
+eq "redemption transferred loan assets" "$((MAKER_LOAN_AFTER - MAKER_LOAN_BEFORE))" "$MAKER_CREDIT"
+
+echo "== 7. decode real on-chain state with the decoder tool =="
 MS=$(cast call "$MIDNIGHT" 'marketState(bytes32)' "$MARKET_ID" --rpc-url "$RPC")
 DM=$(cd "$CRATE" && cargo run --quiet --example e2e -- decode-market "$MS")
 eq "decoded tick_spacing"   "$(grep TICK_SPACING <<<"$DM" | awk '{print $2}')" "4"
@@ -102,7 +166,7 @@ DP=$(cd "$CRATE" && cargo run --quiet --example e2e -- decode-position "$POS")
 CREDIT_ONCHAIN=$(cast call "$MIDNIGHT" 'credit(bytes32,address)(uint128)' "$MARKET_ID" "$MAKER" --rpc-url "$RPC" | awk '{print $1}')
 eq "decoded maker credit == getter" "$(grep CREDIT <<<"$DP" | awk '{print $2}')" "$CREDIT_ONCHAIN"
 
-echo "== 7. cancel the root (encode_cancel_root_calldata) then a re-take must revert =="
+echo "== 8. cancel the root (encode_cancel_root_calldata) then a re-take must revert =="
 cast send "$RATIFIER" "$CANCEL" --rpc-url "$RPC" --private-key "$PK1" >/dev/null
 if cast call "$MIDNIGHT" "$TAKE" --from "$ACCOUNT0" --rpc-url "$RPC" >/dev/null 2>&1; then
   fail "re-take after cancel should have reverted"

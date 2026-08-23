@@ -4,6 +4,9 @@
 //! anvil default keys/params are baked.
 //!
 //!   cargo run --example e2e -- gen
+//!   cargo run --example e2e -- gen-actions
+//!   cargo run --example e2e -- gen-repay <debt> <collateral>
+//!   cargo run --example e2e -- gen-redeem <units>
 //!   cargo run --example e2e -- decode-market <hex>
 //!   cargo run --example e2e -- decode-position <hex>
 
@@ -24,6 +27,8 @@ const CURSOR: u64 = 300_000_000_000_000_000;
 // on-chain settlement-fee curve set by the deploy; ttm >= 360d so the flat cbp6 (0.005 WAD) applies
 const CBPS: [u16; 7] = [14, 14, 98, 417, 1250, 2500, 5000];
 const TARGET_SELLER_ASSETS: u128 = 99_000; // sizing: size a take to hit ~this many seller assets
+const ACTION_COLLATERAL_SUPPLY: u128 = 1_000;
+const BUNDLE_COLLATERAL_SUPPLY: u128 = 2_000;
 
 const fn hexlit(s: &str) -> [u8; 32] {
     let b = s.as_bytes();
@@ -61,6 +66,10 @@ fn hx(b: &[u8]) -> String {
         s.push_str(&format!("{x:02x}"));
     }
     s
+}
+
+fn parse_u256(value: &str) -> U256 {
+    U256::from_str_radix(value.split_whitespace().next().unwrap(), 10).unwrap()
 }
 
 fn market() -> Market {
@@ -216,6 +225,104 @@ fn gen() {
     println!("VALIDATE_FLAGGED_TICK {bad_flagged}");
 }
 
+fn signed_takeable() -> TakeableOffer {
+    let sk = SigningKey::from_bytes(&PK1.into()).unwrap();
+    let maker = signer_address(&sk);
+    let ratifier = env_addr("RATIFIER");
+    let offer = offer(maker, ratifier);
+    let tree = OfferTree::build(vec![hash_offer(&offer)]).unwrap();
+    let sig = sign_digest(
+        &sk,
+        &tree_digest(
+            tree.root(),
+            tree.height(),
+            word_from_u64(CHAIN_ID),
+            &ratifier,
+        ),
+    );
+    TakeableOffer {
+        market_id: market_id(&offer.market),
+        units: U256::from(u128::MAX),
+        ratifier_data: encode_ratifier_data(&sig, &tree.root(), 0, &[]),
+        offer,
+    }
+}
+
+fn gen_actions() {
+    let market = market();
+    let taker = addr(ACCOUNT0);
+    let bundles = env_addr("BUNDLES");
+    let takeable = signed_takeable();
+    let max_units =
+        seller_assets_to_units(&takeable.offer, U256::from(TARGET_SELLER_ASSETS), 1, CBPS).unwrap();
+
+    let supply = supply_collateral_to(
+        CHAIN_ID,
+        market.midnight,
+        &market,
+        0,
+        U256::from(ACTION_COLLATERAL_SUPPLY),
+        taker,
+    )
+    .unwrap();
+    let authorization = set_is_authorized_to(market.midnight, bundles, true, taker).unwrap();
+    let offers = [takeable];
+    let borrow = take_borrow_to(
+        CHAIN_ID,
+        bundles,
+        &TakeBorrow {
+            market: &market,
+            loan_assets: U256::from(TARGET_SELLER_ASSETS),
+            max_units,
+            taker,
+            offers: &offers,
+            deadline: U256::from(MATURITY),
+        },
+        Some(CollateralDeposit {
+            collateral_index: 0,
+            assets: U256::from(BUNDLE_COLLATERAL_SUPPLY),
+        }),
+    )
+    .unwrap();
+
+    println!("SUPPLY_CALLDATA {}", hx(&supply.data));
+    println!("AUTH_BUNDLES_CALLDATA {}", hx(&authorization.data));
+    println!("BORROW_BUNDLE_CALLDATA {}", hx(&borrow.data));
+    println!("ACTION_COLLATERAL_SUPPLY {ACTION_COLLATERAL_SUPPLY}");
+    println!("BUNDLE_COLLATERAL_SUPPLY {BUNDLE_COLLATERAL_SUPPLY}");
+    println!("BUNDLE_BORROW_ASSETS {TARGET_SELLER_ASSETS}");
+    println!("BUNDLE_BORROW_UNITS {max_units}");
+}
+
+fn gen_repay(debt: U256, collateral_assets: U256) {
+    let input = RepayWithdraw {
+        market: &market(),
+        repay_assets: debt,
+        withdraw_collateral: Some(CollateralDeposit {
+            collateral_index: 0,
+            assets: collateral_assets,
+        }),
+        on_behalf: addr(ACCOUNT0),
+        deadline: U256::from(MATURITY),
+    };
+    let tx = repay_withdraw_collateral_to(CHAIN_ID, env_addr("BUNDLES"), &input).unwrap();
+    println!("REPAY_WITHDRAW_CALLDATA {}", hx(&tx.data));
+}
+
+fn gen_redeem(units: U256) {
+    let maker = signer_address(&SigningKey::from_bytes(&PK1.into()).unwrap());
+    let tx = redeem_to(
+        CHAIN_ID,
+        env_addr("MIDNIGHT"),
+        &market(),
+        units,
+        maker,
+        maker,
+    )
+    .unwrap();
+    println!("REDEEM_CALLDATA {}", hx(&tx.data));
+}
+
 fn read_hex_arg(a: &str) -> Vec<u8> {
     let a = a.trim().trim_start_matches("0x");
     (0..a.len() / 2)
@@ -227,6 +334,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => gen(),
+        Some("gen-actions") => gen_actions(),
+        Some("gen-repay") => gen_repay(parse_u256(&args[2]), parse_u256(&args[3])),
+        Some("gen-redeem") => gen_redeem(parse_u256(&args[2])),
         Some("decode-market") => {
             let m = decode_market_state(&read_hex_arg(&args[2])).unwrap();
             println!("TICK_SPACING {}", m.tick_spacing);
@@ -238,6 +348,8 @@ fn main() {
             println!("CREDIT {}", p.credit);
             println!("DEBT {}", p.debt);
         }
-        _ => panic!("usage: e2e <gen|decode-market|decode-position> [hex]"),
+        _ => panic!(
+            "usage: e2e <gen|gen-actions|gen-repay|gen-redeem|decode-market|decode-position> [args]"
+        ),
     }
 }

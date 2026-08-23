@@ -3,7 +3,7 @@ name = "nocturne-midnight"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.90"
-description = "Off-chain Rust SDK for Morpho Midnight: EIP-712 offer hashing, Merkle trees, signing, simulation, decoding, and calldata encoding."
+description = "Rust SDK for Morpho Midnight offers, execution, simulation, verification, and position management."
 authors = ["Oliver Tipton <oliverptipton@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Oliverpt-1/Nocturne"
@@ -33,6 +33,11 @@ path = "e2e/mm_loop.rs"
 [[example]]
 name = "publish_offer"
 path = "examples/publish_offer.rs"
+required-features = ["alloy-wallet"]
+
+[[example]]
+name = "requirements_e2e"
+path = "e2e/requirements.rs"
 required-features = ["alloy-wallet"]
 
 [dependencies]
