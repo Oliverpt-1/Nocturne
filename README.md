@@ -19,13 +19,10 @@
 
 ## What is Nocturne?
 
-Nocturne lets Rust applications build, validate, sign, publish, discover, simulate, and take
-offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol:
-
-| Product | Use it to |
-|---|---|
-| `nocturne` SDK | Build integrations: create and publish maker offers, fetch books and quotes, simulate fills, and submit transactions |
-| `nocturne-verify` CLI | Independently inspect existing calldata, payloads, and typed-data requests before signing or submitting them |
+Nocturne is a Rust SDK for integrating with the
+[Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It builds and signs offers,
+constructs Merkle trees, simulates execution, reads the public order book, encodes calldata and
+mempool payloads, and produces transactions that Rust wallet clients can submit.
 
 ## Status
 
