@@ -21,8 +21,8 @@
 
 Nocturne is a Rust SDK for integrating with the
 [Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It builds and signs offers,
-constructs Merkle trees, simulates execution, reads the public order book, encodes calldata and
-mempool payloads, and produces transactions that Rust wallet clients can submit.
+constructs Merkle trees, simulates execution, reads the public order book, manages lending and
+borrowing positions, and produces transactions that Rust wallet clients can submit.
 
 ## Status
 

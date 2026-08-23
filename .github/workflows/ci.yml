@@ -29,7 +29,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
     name: test
@@ -39,9 +39,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Unit + parity tests are self-contained (contract-derived constants are baked in).
-      # The live anvil e2e (e2e/*.sh) needs Foundry + a Midnight checkout and is not run in CI.
-      - run: cargo test --workspace --all-targets
-      - run: cargo test --workspace --doc
+      # The live Anvil e2e needs Foundry plus Midnight and Bundler checkouts, so it runs manually.
+      - run: cargo test --workspace --all-targets --all-features
+      - run: cargo test --workspace --doc --all-features
 
   docs:
     name: docs
@@ -50,6 +50,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps
+      - run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings

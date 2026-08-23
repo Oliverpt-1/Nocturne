@@ -99,6 +99,14 @@ runs this entire flow through an Alloy wallet.
 [`take_offer.rs`](https://github.com/Oliverpt-1/Nocturne/blob/main/crates/nocturne/examples/take_offer.rs)
 shows validation, sizing, simulation, and encoding.
 
+### Manage a position
+
+Use `supply_collateral`, `take_lend`, `take_borrow`, `supply_collateral_take_borrow`,
+`repay_withdraw_collateral`, and `redeem` to build wallet-ready transactions. Before bundle calls,
+build a `RequirementPlan` and call `discover_requirements` to resolve only the ERC-20 approvals and
+Midnight authorization that are still missing. This RPC-backed helper requires the `alloy-wallet`
+feature; the transaction builders themselves are wallet-agnostic.
+
 ## Main APIs
 
 | Need | Start with |
@@ -108,6 +116,8 @@ shows validation, sizing, simulation, and encoding.
 | Local or external signing | `LocalSigner`, `ExternalSigner` |
 | Books, quotes, and API validation | `MidnightApi` |
 | Publication payloads | `Payload`, `mempool_submission` |
+| Taking offers and managing positions | `take_lend`, `take_borrow`, `supply_collateral`, `repay_withdraw_collateral`, `redeem` |
+| Required approvals and authorization | `RequirementPlan`, `discover_requirements` |
 | Capacity and notional sizing | `get_consumable_units`, `buyer_assets_to_units`, `seller_assets_to_units` |
 | Prices, APRs, fees, and simulation | `tick_to_price`, `tick_to_apr`, `take_amounts`, `simulate_take` |
 | Calldata and state codecs | `encode_*`, `decode_*` |
