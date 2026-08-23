@@ -1,6 +1,6 @@
-//! Minimal maker path: build an offer, sign the tree, and verify it will ratify.
+//! First-offer path: build an offer, sign its tree, and verify the ratifier proof locally.
 //!
-//!   cargo run --example quickstart
+//!   cargo run -p nocturne-midnight --example quickstart
 
 use nocturne::*;
 

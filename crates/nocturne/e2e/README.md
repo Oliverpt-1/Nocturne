@@ -1,43 +1,83 @@
-# e2e - live anvil test against real Midnight
+# Maintainer E2E harness
 
-Deploys a **real** Midnight environment on anvil (no stubs: real `Midnight`,
-`EcrecoverRatifier`, `EcrecoverAuthorizer`, real ERC20s, `Oracle`) and drives the full offer
-lifecycle using only the `nocturne` tools, asserting the chain accepts every artifact and
-that on-chain state matches the tools' predictions.
+This directory is Nocturne's live protocol-compatibility harness. **Integrators do not need it to
+use the SDK.** It exists for maintainers changing hashes, codecs, math, validation, submission, or
+contract-facing workflows.
+
+The harness deploys real `Midnight`, `EcrecoverRatifier`, `EcrecoverAuthorizer`, ERC-20, and oracle
+contracts to a fresh Anvil node. No contract stub accepts Nocturne output on faith: the deployed
+contracts execute the SDK-produced signatures, proofs, and calldata.
+
+## Requirements
+
+- Rust 1.90 or newer.
+- Foundry commands `anvil`, `forge`, `cast` on `PATH`.
+- An otherwise idle local port `8545`.
+- A compatible `morpho-org/midnight` checkout. The last validated revision is `e6f2bf28`.
+
+The scripts temporarily copy one deployment script into `<MIDNIGHT_REPO>/script`, refuse to
+overwrite an existing file, and remove the copy on exit. Generated Foundry broadcast data is
+written under this workspace's `target/` directory.
+
+## Full offer lifecycle
+
+From the Nocturne repository root:
 
 ```sh
-# needs anvil + cast + forge (Foundry) on PATH; point MIDNIGHT_REPO at a
-# morpho-org/midnight checkout (rev f47568c9)
 MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/run.sh
 ```
 
-Every tool is exercised through the live node (15 checks):
+The lifecycle proves:
 
-1. deploy real Midnight + ratifier + authorizer + tokens; create the market (**builder**)
-2. tools build the offer, sign the tree, sign an `Authorization`, encode calldata (`e2e.rs`)
-3. `sign_authorization` → real `EcrecoverAuthorizer.setIsAuthorized` accepts it (**authorize**)
-4. tool-built `take` calldata → real `Midnight.take` accepts the signed offer (**hash/tree/proof/sign/verify/codec**)
-5. on-chain credit / debt / consumed / transferred assets == predictions, with a **non-zero
-   settlement fee** applied (**simulate_take**, fee-bearing)
-6. size a take to a target asset amount → the real take yields exactly that (**sizing**)
-7. a bad-tick offer is flagged by `validate_offer` and reverts on-chain (**validate**)
-8. `decode_market_state` / `decode_position` match the live getters (**decode**)
-9. `encode_cancel_root_calldata` → real `cancelRoot`, after which a re-take reverts (**cancel**)
+1. `MarketBuilder` output creates a market on the deployed Midnight contract.
+2. Rust builds an offer, canonical tree, Merkle proof, Ecrecover signature, authorization, and
+   `take` calldata.
+3. `sign_authorization` output is accepted by the real `EcrecoverAuthorizer`.
+4. The real `Midnight.take` accepts the SDK-built offer, ratifier data, and calldata.
+5. Credit, debt, consumption, token transfers, and a non-zero settlement fee match
+   `simulate_take` predictions.
+6. A take sized with `seller_assets_to_units` yields the predicted target assets.
+7. An inaccessible tick is rejected both by `validate_offer` and the contract.
+8. Decoded market and position views match live contract getters.
+9. SDK-built cancellation calldata invalidates the root and prevents another take.
 
-Files: `DeployE2E.s.sol` (Solidity deploy, copied into the contracts repo to run),
-`../examples/e2e.rs` (the tool-driven artifact generator), `run.sh` (orchestrator).
-The settlement fee is non-zero but the market maturity is far enough out that the fee is flat
-(the 360-day breakpoint), so predictions stay deterministic regardless of anvil timing.
+The runner prints one `PASS` per assertion and exits non-zero on the first mismatch.
 
-## Market-making loop
+## Market-maker cancel-and-replace lifecycle
 
 ```sh
 MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/mm.sh
 ```
 
-A full MM lifecycle against real Midnight, driven by the SDK (`../examples/mm_loop.rs`,
-`DeployMM.s.sol`): quote a grid of lend offers **by APR** as one signed tree, full + partial
-fills, then a fair-value move → re-quote (new tree/root/sig) → cancel-and-replace (old root
-reverts `RootCanceled`, new grid fills at the new price), with inventory checked each round and
-every fill matched to `take_amounts`. Anvil is pinned to a fixed timestamp so maturity is exactly
-one year out, making APR quoting realistic while keeping the fee flat.
+This harness fixes Anvil's timestamp so the market has exactly one year to maturity, then:
+
+1. Quotes a four-rung lend grid from APR targets.
+2. Covers the full grid with one signed tree.
+3. Executes full and partial fills and checks consumption and inventory.
+4. Moves fair value and creates a second tree.
+5. Cancels the first root and proves stale quotes revert.
+6. Fills the replacement grid and checks every amount against SDK math.
+
+## Files
+
+| File | Role |
+|---|---|
+| `DeployE2E.s.sol` | Deploys contracts and creates the lifecycle market |
+| `e2e.rs` | Generates signed lifecycle artifacts and decodes live return data |
+| `run.sh` | Orchestrates deployment, submission, and assertions |
+| `DeployMM.s.sol` | Deploys the fixed-time market-maker environment |
+| `mm_loop.rs` | Generates APR grids, proofs, takes, and cancellations |
+| `mm.sh` | Orchestrates cancel-and-replace and inventory assertions |
+
+## What the harness does not prove
+
+- It is not a professional security audit or formal verification.
+- It does not test the public Midnight API, Base mempool availability, RPC reliability, wallet UI,
+  reorganization behavior, gas policy, or production key custody.
+- It validates the named compatible contracts revision; later contract changes require rerunning
+  and reviewing the parity suite.
+- Its deterministic Anvil accounts and private keys are public test fixtures and must never hold
+  real value.
+
+Unit, property, differential, and fixture tests remain the faster first line of defense. Run those
+before the live harness with `cargo test --workspace --all-targets`.

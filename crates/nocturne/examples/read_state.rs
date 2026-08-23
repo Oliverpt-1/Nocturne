@@ -1,10 +1,10 @@
-//! Read the chain: decode real production calldata into typed views.
+//! Read-only path: decode checked-in production calldata into typed views without an RPC call.
 //!
 //! The inputs are two real Base-mainnet transactions checked into the test fixtures: a taker's
 //! bundle fill (`IMidnightBundles`) and the maker's `SetterRatifier.setIsRootRatified` whose
 //! root covers the bundle's first fill.
 //!
-//!   cargo run --example read_state
+//!   cargo run -p nocturne-midnight --example read_state
 
 use nocturne::*;
 

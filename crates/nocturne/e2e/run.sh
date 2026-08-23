@@ -12,7 +12,7 @@ ACCOUNT0=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 GROUP=0x0000000000000000000000000000000000000000000000000000000000000001
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
-MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a morpho-org/midnight checkout at rev f47568c9}"
+MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a compatible morpho-org/midnight checkout (last validated: e6f2bf28)}"
 SCRIPT_DIR="$MID/script"
 DEPLOY_SCRIPT="$SCRIPT_DIR/DeployE2E.s.sol"
 CREATED_SCRIPT_DIR=0

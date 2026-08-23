@@ -1,7 +1,7 @@
-//! Quote a book: a ladder of lend offers priced by APR, hashed into one tree and covered by a
-//! single signature - then re-quote when fair value moves (cancel-and-replace).
+//! Maker quoting path: build a ladder of APR-priced lend offers, sign one tree, then construct a
+//! cancel-and-replace re-quote when fair value moves.
 //!
-//!   cargo run --example quote_book
+//!   cargo run -p nocturne-midnight --example quote_book
 
 use nocturne::*;
 

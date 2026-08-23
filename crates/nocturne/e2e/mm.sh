@@ -11,7 +11,7 @@ PK1=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d   # maker
 ACCOUNT0=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
-MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a morpho-org/midnight checkout at rev f47568c9}"
+MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a compatible morpho-org/midnight checkout (last validated: e6f2bf28)}"
 SCRIPT_DIR="$MID/script"
 DEPLOY_SCRIPT="$SCRIPT_DIR/DeployMM.s.sol"
 CREATED_SCRIPT_DIR=0

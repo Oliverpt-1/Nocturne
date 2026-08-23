@@ -1,5 +1,7 @@
-//! Benchmarks the maker re-quote pipeline: hash N offer leaves -> build tree -> all proofs -> sign root.
-//! This is the loop an MM repeats every time the market moves. Prints machine-readable lines.
+//! Performance path: hash N maker offers, build their tree, generate every proof, and sign the
+//! root. This is the local pipeline an MM repeats when the market moves.
+//!
+//!   cargo run -p nocturne-midnight --release --example bench
 
 use k256::ecdsa::SigningKey;
 use nocturne::*;

@@ -1,7 +1,7 @@
-//! Take an offer: validate it, size the take in notional terms, simulate the exact fill, and
-//! encode the `take` calldata a taker would submit.
+//! Taker path: validate an executable offer, size it in notional terms, simulate the exact fill,
+//! and encode the `take` calldata a wallet would submit.
 //!
-//!   cargo run --example take_offer
+//!   cargo run -p nocturne-midnight --example take_offer
 
 use nocturne::*;
 
