@@ -20,8 +20,8 @@ alloy-wallet = ["dep:alloy"]
 name = "nocturne"
 path = "src/lib.rs"
 
-# Drivers for the live e2e harness (invoked by e2e/run.sh and e2e/mm.sh). They live next to
-# their scripts rather than in examples/, which holds the SDK usage recipes.
+# Internal drivers used by the unified lifecycle harness. They live beside the deployment scripts
+# rather than in examples/, which holds public SDK usage recipes.
 [[example]]
 name = "e2e"
 path = "e2e/e2e.rs"
@@ -38,6 +38,11 @@ required-features = ["alloy-wallet"]
 [[example]]
 name = "requirements_e2e"
 path = "e2e/requirements.rs"
+required-features = ["alloy-wallet"]
+
+[[example]]
+name = "lifecycle"
+path = "e2e/lifecycle.rs"
 required-features = ["alloy-wallet"]
 
 [dependencies]
