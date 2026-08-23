@@ -4,13 +4,13 @@
   <a href="https://t.me/+tc58eLgH-dU1ZTJh"><img src="https://img.shields.io/badge/Telegram-chat-2CA5E0?logo=telegram&logoColor=white" alt="Telegram Chat"></a>
 </p>
 
-<p align="center"><em>Fast off-chain signing and offers for the Morpho Midnight protocol.</em></p>
+<p align="center"><em>A complete Rust integration path for Morpho Midnight offers.</em></p>
 
 <p align="center">
   <a href="crates/nocturne/README.md">SDK Guide</a> |
   <a href="https://docs.rs/nocturne-midnight">API Docs</a> |
-  <a href="crates/nocturne/examples">Examples</a> |
-  <a href="crates/nocturne-verify/README.md">Verifier</a>
+  <a href="crates/nocturne/examples/README.md">Examples</a> |
+  <a href="crates/nocturne-verify/README.md">Verifier CLI</a>
 </p>
 
 <p align="center">
@@ -19,61 +19,104 @@
 
 ## What is Nocturne?
 
-Nocturne is a Rust SDK for integrating with the
-[Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It builds and signs offers,
-constructs Merkle trees, simulates execution, reads the public order book, encodes calldata and
-mempool payloads, and produces transactions that Rust wallet clients can submit.
+Nocturne lets Rust applications build, validate, sign, publish, discover, simulate, and take
+offers on the [Morpho Midnight](https://github.com/morpho-org/midnight) protocol. It contains two
+separate tools:
+
+| Product | Use it to |
+|---|---|
+| `nocturne` SDK | Build integrations: create and publish maker offers, fetch books and quotes, simulate fills, and submit transactions |
+| `nocturne-verify` CLI | Independently inspect existing calldata, payloads, and typed-data requests before signing or submitting them |
+
+The verifier is optional. Applications depend on the SDK; humans and signing systems can use the
+CLI as a separate review step.
 
 ## Status
 
 Nocturne is an early v0.1.0 release and has not been independently security-audited. See
 [SECURITY.md](SECURITY.md) before using it with real value.
 
-## For Developers
+## Install
 
-Add the SDK to your Rust project:
+The crates.io package and Rust import intentionally have different names:
+
+| Context | Name |
+|---|---|
+| crates.io SDK package | `nocturne-midnight` |
+| Rust import | `nocturne` |
+| Verification binary | `nocturne-verify` |
+
+Add the SDK to a Rust application:
 
 ```toml
 [dependencies]
 nocturne = { package = "nocturne-midnight", version = "0.1.0" }
 ```
 
-See the [SDK guide](crates/nocturne/README.md) for the quickstart and publication flow, or browse
-the [examples](crates/nocturne/examples) and [API documentation](https://docs.rs/nocturne-midnight).
-The repository also includes the optional [`nocturne-verify`](crates/nocturne-verify/README.md)
-CLI for inspecting existing payloads.
+Install the separate verifier CLI:
 
-The minimum supported Rust version is 1.90. To test the repository:
+```sh
+cargo install nocturne-verify
+```
+
+## Complete flows
+
+```mermaid
+flowchart LR
+    A[Offer terms] --> B[Build and validate]
+    B --> C[Group and build tree]
+    C --> D[Sign or ratify]
+    D --> E[Encode payload]
+    E --> F[Publish with Rust wallet]
+
+    G[Midnight API] --> H[Book or quote]
+    H --> I[Size and simulate]
+    I --> J[Encode take calldata]
+    J --> K[Submit with Rust wallet]
+
+    D -. inspect .-> V[nocturne-verify]
+    E -. inspect .-> V
+    J -. inspect .-> V
+```
+
+- **Maker:** build → validate → group → sign or ratify → encode → publish.
+- **Taker:** fetch → quote → size → simulate → encode → submit.
+- **Reviewer:** receive bytes or typed data → decode → reproduce root and digest → verify.
+
+Start with the [SDK quickstart and complete workflows](crates/nocturne/README.md). Every example and
+its exact Cargo command are listed in the [examples index](crates/nocturne/examples/README.md).
+The [verifier guide](crates/nocturne-verify/README.md) stands alone for CLI users.
+
+## Development and verification
+
+The minimum supported Rust version is 1.90. Run the repository checks with:
 
 ```sh
 cargo test --workspace --all-targets
 ```
 
-Protocol-critical outputs are checked against contract and SDK vectors. The
-[live Anvil harness](crates/nocturne/e2e) exercises the complete lifecycle against deployed
-Midnight contracts and requires Foundry plus a compatible contracts checkout.
+Protocol-critical outputs have contract and TypeScript SDK parity coverage. The maintainer-only
+[live Anvil harness](crates/nocturne/e2e/README.md) exercises complete maker, taker, authorization,
+cancel-and-replace, state-decoding, and market-making lifecycles against deployed Midnight
+contracts.
 
 ## Getting help
 
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
 - Open a [GitHub issue](https://github.com/Oliverpt-1/Nocturne/issues) for bugs and features.
-
-## Security
-
-Nocturne produces signatures and calldata that can move real value. Report vulnerabilities
-privately using the process in [SECURITY.md](SECURITY.md).
+- Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 
 ## Acknowledgements
 
-- [Morpho](https://github.com/morpho-org/midnight) - the Midnight protocol and contracts this
-  library mirrors.
-- [ruint](https://github.com/recmo/uint) / [alloy](https://github.com/alloy-rs) - the `U256`
-  primitive.
-- [RustCrypto `k256`](https://github.com/RustCrypto/elliptic-curves) - secp256k1 signing and
+- [Morpho SDKs](https://github.com/morpho-org/sdks) and
+  [Morpho Midnight](https://github.com/morpho-org/midnight) — protocol behavior, compatibility
+  vectors, and selected algorithms were developed with reference to these public projects.
+- [ruint](https://github.com/recmo/uint) / [alloy](https://github.com/alloy-rs) — Ethereum
+  primitives and optional wallet integration.
+- [RustCrypto `k256`](https://github.com/RustCrypto/elliptic-curves) — secp256k1 signing and
   recovery.
-- [`tiny-keccak`](https://github.com/debris/tiny-keccak), [`rayon`](https://github.com/rayon-rs/rayon).
-- [Foundry](https://github.com/foundry-rs/foundry) - `anvil` / `forge` / `cast` power the parity
-  fixtures and the live e2e harness.
+- [`tiny-keccak`](https://github.com/debris/tiny-keccak), [`rayon`](https://github.com/rayon-rs/rayon),
+  and [Foundry](https://github.com/foundry-rs/foundry).
 
 ## Disclaimer
 

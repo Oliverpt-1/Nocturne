@@ -37,7 +37,8 @@ consumer to mis-read on-chain state:
 
 ## Verification
 
-Every hashing, signing, pricing, and encoding path is parity-checked byte-for-byte against the
-Midnight contracts (`cargo test`), and the full lifecycle is exercised against a real deployment on
-anvil (`crates/nocturne/e2e/`). A report that shows a divergence from the contracts is exactly the
-kind of thing we want to hear about.
+Protocol-critical hashing, signing, pricing, sizing, simulation, and encoding paths have dedicated
+contract or TypeScript SDK parity coverage (`cargo test`). The full lifecycle is also exercised
+against a real Midnight deployment on Anvil (`crates/nocturne/e2e/`). This coverage is extensive,
+but it is not formal verification or an independent audit. A report that shows any divergence from
+the contracts is exactly the kind of thing we want to hear about.
