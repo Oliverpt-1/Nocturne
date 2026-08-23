@@ -14,7 +14,7 @@ GROUP=0x0000000000000000000000000000000000000000000000000000000000000001
 
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
 MID="${MIDNIGHT_REPO:?set MIDNIGHT_REPO to a compatible morpho-org/midnight checkout (last validated: e6f2bf28)}"
-BUNDLE_DIR="${BUNDLES_REPO:?set BUNDLES_REPO to a compatible morpho-org/bundler3 checkout (last validated: 9c457e9)}"
+BUNDLE_DIR="${BUNDLES_REPO:?set BUNDLES_REPO to a compatible morpho-org/bundles checkout (last validated: 9c457e9)}"
 SCRIPT_DIR="$MID/script"
 DEPLOY_SCRIPT="$SCRIPT_DIR/DeployE2E.s.sol"
 CREATED_SCRIPT_DIR=0
@@ -30,6 +30,9 @@ PASS=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; exit 1; }
 eq()   { local a="${2%% *}" b="${3%% *}"; [ "$a" = "$b" ] && ok "$1 ($a)" || fail "$1: got '$a' expected '$b'"; }
+
+[ -f "$BUNDLE_DIR/src/midnight/MidnightBundlesV1.sol" ] || \
+  fail "BUNDLES_REPO does not contain src/midnight/MidnightBundlesV1.sol"
 
 echo "== 1. start anvil + deploy REAL Midnight =="
 if [ -e "$DEPLOY_SCRIPT" ]; then fail "refusing to overwrite existing $DEPLOY_SCRIPT"; fi

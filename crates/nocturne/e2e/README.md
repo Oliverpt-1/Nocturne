@@ -1,92 +1,59 @@
-# Maintainer E2E harness
+# Maintainer lifecycle tests
 
-This directory is Nocturne's live protocol-compatibility harness. **Integrators do not need it to
-use the SDK.** It exists for maintainers changing hashes, codecs, math, validation, submission, or
-contract-facing workflows.
+This harness tests complete SDK workflows. Use the single `lifecycle` entrypoint from the
+repository root:
 
-The harness deploys real `Midnight`, `MidnightBundlesV1`, `EcrecoverRatifier`,
-`EcrecoverAuthorizer`, ERC-20, and oracle contracts to a fresh Anvil node. No contract stub accepts
-Nocturne output on faith: the deployed contracts execute the SDK-produced signatures, proofs, and
-calldata.
+```sh
+cargo run -p nocturne-midnight --features alloy-wallet --example lifecycle -- <scenario>
+```
 
-## Requirements
+| Scenario | What it proves |
+|---|---|
+| `anvil` | Build, sign, authorize, take, supply, borrow, repay, redeem, decode, and cancel against freshly deployed Midnight contracts |
+| `market-maker` | Quote a multi-rung grid, fill it, cancel it, reject stale quotes, and fill its replacement |
+| `base-taker` | Fetch a hosted quote and complete a guarded taker borrow/repay lifecycle on Base |
+| `base-maker` | Validate and publish an offer, observe router indexing, take it from a second wallet, repay, redeem, and cancel on Base |
+| `resume` | Inspect the saved journal and reconcile an interrupted Base lifecycle |
+| `cleanup` | Revoke the Base maker's Midnight allowance and ratifier authorization |
 
-- Rust 1.90 or newer.
-- Foundry commands `anvil`, `forge`, `cast` on `PATH`.
-- An otherwise idle local port `8545`.
-- A compatible `morpho-org/midnight` checkout. The last validated revision is `e6f2bf28`.
-- A compatible `morpho-org/bundler3` checkout. The last validated revision is `9c457e9`.
+Every Base transaction is simulated first. The Base scenarios record confirmed transaction
+hashes in the ignored `.nocturne-e2e-journal.json` file, refuse to overwrite an unfinished run,
+and check shared lifecycle invariants after borrowing and after reconciliation.
 
-The scripts temporarily copy one deployment script into `<MIDNIGHT_REPO>/script`, refuse to
-overwrite an existing file, and remove the copy on exit. Generated Foundry broadcast data is
-written under this workspace's `target/` directory.
+## Local Anvil runs
 
-## Full offer lifecycle
-
-From the Nocturne repository root:
+Requirements: Rust 1.90+, Foundry, a compatible `morpho-org/midnight` checkout (last validated at
+`e6f2bf28`), and a compatible `morpho-org/bundles` checkout (last validated at `9c457e9`).
 
 ```sh
 MIDNIGHT_REPO=/path/to/midnight \
-BUNDLES_REPO=/path/to/bundler3 \
-crates/nocturne/e2e/run.sh
+BUNDLES_REPO=/path/to/bundles \
+cargo run -p nocturne-midnight --features alloy-wallet --example lifecycle -- anvil
+
+MIDNIGHT_REPO=/path/to/midnight \
+cargo run -p nocturne-midnight --features alloy-wallet --example lifecycle -- market-maker
 ```
 
-The lifecycle proves:
+The harness deploys real `Midnight`, `MidnightBundlesV1`, `EcrecoverRatifier`,
+`EcrecoverAuthorizer`, ERC-20, and oracle contracts. Its deterministic Anvil keys are public test
+fixtures and must never hold real value.
 
-1. `MarketBuilder` output creates a market on the deployed Midnight contract.
-2. Rust builds an offer, canonical tree, Merkle proof, Ecrecover signature, authorization, and
-   `take` calldata.
-3. `sign_authorization` output is accepted by the real `EcrecoverAuthorizer`.
-4. The real `Midnight.take` accepts the SDK-built offer, ratifier data, and calldata.
-5. Credit, debt, consumption, token transfers, and a non-zero settlement fee match
-   `simulate_take` predictions.
-6. A take sized with `seller_assets_to_units` yields the predicted target assets.
-7. An inaccessible tick is rejected both by `validate_offer` and the contract.
-8. Live RPC discovery finds missing token approval and bundle authorization, then clears both after
-   the generated prerequisite transactions execute.
-9. Direct collateral supply and atomic collateral-supply-plus-borrow calldata execute with exact
-   expected token, debt, and collateral deltas.
-10. A full repayment withdraws all borrower collateral, and redemption transfers all maker credit.
-11. Decoded market and position views match live contract getters.
-12. SDK-built cancellation calldata invalidates the root and prevents another take.
+## Guarded Base runs
 
-The runner prints one `PASS` per assertion and exits non-zero on the first mismatch.
-
-## Market-maker cancel-and-replace lifecycle
+Load the ignored `.env.local` into your shell, then explicitly acknowledge the transaction mode:
 
 ```sh
-MIDNIGHT_REPO=/path/to/midnight crates/nocturne/e2e/mm.sh
+LIVE_BASE_CONFIRM=I_UNDERSTAND \
+cargo run -p nocturne-midnight --features alloy-wallet --example lifecycle -- base-taker
+
+LIVE_MAKER_CONFIRM=I_UNDERSTAND \
+cargo run -p nocturne-midnight --features alloy-wallet --example lifecycle -- base-maker
 ```
 
-This harness fixes Anvil's timestamp so the market has exactly one year to maturity, then:
+`base-taker` uses `RPC_URL` and `PRIVATE_KEY`. `base-maker` uses `RPC_URL`,
+`PRIVATE_KEY_BIGGER`, and `PRIVATE_KEY_Wallet_1`. Never commit these values. If a run stops after a
+transaction, use `resume`; use `cleanup` to revoke maker permissions.
 
-1. Quotes a four-rung lend grid from APR targets.
-2. Covers the full grid with one signed tree.
-3. Executes full and partial fills and checks consumption and inventory.
-4. Moves fair value and creates a second tree.
-5. Cancels the first root and proves stale quotes revert.
-6. Fills the replacement grid and checks every amount against SDK math.
-
-## Files
-
-| File | Role |
-|---|---|
-| `DeployE2E.s.sol` | Deploys contracts and creates the lifecycle market |
-| `e2e.rs` | Generates signed lifecycle artifacts and decodes live return data |
-| `run.sh` | Orchestrates deployment, submission, and assertions |
-| `DeployMM.s.sol` | Deploys the fixed-time market-maker environment |
-| `mm_loop.rs` | Generates APR grids, proofs, takes, and cancellations |
-| `mm.sh` | Orchestrates cancel-and-replace and inventory assertions |
-
-## What the harness does not prove
-
-- It is not a professional security audit or formal verification.
-- It does not test the public Midnight API, Base mempool availability, RPC reliability, wallet UI,
-  reorganization behavior, gas policy, or production key custody.
-- It validates the named compatible contracts revision; later contract changes require rerunning
-  and reviewing the parity suite.
-- Its deterministic Anvil accounts and private keys are public test fixtures and must never hold
-  real value.
-
-Unit, property, differential, and fixture tests remain the faster first line of defense. Run those
-before the live harness with `cargo test --workspace --all-targets`.
+These tests are strong compatibility evidence, not a security audit. Hosted API availability,
+RPC behavior, chain reorganizations, gas policy, and production key custody remain external
+operational risks.
