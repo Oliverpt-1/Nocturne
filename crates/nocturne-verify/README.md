@@ -1,96 +1,162 @@
 # nocturne-verify
 
-Offline decoder and verifier for Morpho Midnight payloads, so nobody has to blind-sign.
+Offline, read-only inspection for Morpho Midnight calldata, maker payloads, and EIP-712 signing
+requests. It turns opaque bytes into readable terms and reproduces the hashes, Merkle roots,
+proofs, and digests that those bytes commit to.
 
-## How it works
+## What this tool is
 
-A Midnight payload is a wall of hex (or a bare 32-byte digest) that no wallet can explain. This
-tool decodes it into plain terms — maker, side, price, size, expiry — and proves the bytes mean
-exactly the terms it prints: Merkle roots and EIP-712 digests are recomputed from scratch,
-signatures are recovered, and any mismatch is a loud FAIL.
+Use `nocturne-verify` when an application or wallet gives you data that is difficult to review:
 
-**You verify by decoding, then reading.** The tool proves *what you read is what you sign*; it
-cannot know whether those terms are the trade you want — that part is yours. `PASS` never means
-"this trade is good." To check intent mechanically, pass `--offers` with offer files from your
-own records.
+- Taker `take` or bundle calldata.
+- Maker `setIsRootRatified` calldata.
+- EIP-712 typed data for an off-chain offer-tree signature.
+- A compressed maker-offer mempool payload.
+- Raw getter return bytes for market or position state.
 
-It runs fully offline (no keys, no network) and is an independent reimplementation,
-parity-checked against the Midnight contracts and real production payloads. Exit codes: `0`
-PASS, `1` FAIL, `2` PARTIAL (see `verify`).
+The CLI decodes the input, prints its terms, and checks every property available from those bytes.
+Pass your own offer JSON with `--offers` when the result must also match separately recorded intent.
+
+## What this tool is not
+
+- It does not build offers or transactions; use the `nocturne` SDK for integration work.
+- It never holds a key, contacts an RPC node, or submits anything.
+- `PASS` does not mean a trade is economically desirable or safe.
+- It cannot prove mutable on-chain state while offline. Such checks produce `PARTIAL`, with a
+  `cast call` command when an RPC check can complete the review.
+- It is independent from the application or wallet being inspected, but it shares protocol
+  primitives with the `nocturne` Rust library. It is not a separately authored cryptographic
+  implementation.
+
+The strongest workflow starts from offer JSON in your own records and uses `digest` to predict the
+root or wallet digest without trusting the application's displayed interpretation.
+
+## Installation
+
+Install the published binary:
 
 ```sh
 cargo install nocturne-verify
-# From a source checkout: cargo run -p nocturne-verify -- <cmd>
 ```
 
-Prebuilt binaries are on each [GitHub release](https://github.com/Oliverpt-1/Nocturne/releases).
+Run it from a source checkout:
 
-## `verify` — check calldata before submitting or approving it
+```sh
+cargo run -p nocturne-verify -- <command>
+```
 
-Takes raw calldata as hex and auto-detects what it is from the selector.
+Prebuilt binaries are attached to each
+[GitHub release](https://github.com/Oliverpt-1/Nocturne/releases).
+
+## Verify transaction calldata
+
+`verify` accepts raw calldata and identifies supported calls from their selector:
 
 ```sh
 nocturne-verify verify 0x<calldata>
 ```
 
-**Taker (take or bundle transaction).** Copy the raw hex from your wallet's Data/Hex tab (or
-Basescan → Input Data → Original; copy the whole field — truncated payloads are refused).
-Every offer is decoded and every signature checked; in a bundle, one bad fill fails the whole
-thing. Useful flags: `--expected-maker 0x...`, `--chain-id N`, `--now $(date +%s)` for APRs.
+Copy the complete value from the wallet's Data/Hex view or a block explorer's original input-data
+view. Truncated data is rejected.
 
-**Maker (`setIsRootRatified` transaction).** The default signing mode: you approve a bare
-32-byte root. Add your intended offers and PASS proves the root commits to exactly them:
+### Taker take or bundle
 
-```sh
-nocturne-verify verify 0x2fd0e45d... --offers offer1.json offer2.json
-```
+Every offer and ratifier payload is decoded. Ecrecover signatures, Merkle membership, signing
+domains, leaf bounds, and bundle fills are checked. One bad fill fails the complete bundle.
 
-**PARTIAL (exit 2)** means nothing failed but something is on-chain state the tool cannot read
-offline — a SetterRatifier fill's root ratification, or a maker root checked without
-`--offers`. The output prints the exact `cast call` to finish the check.
-
-## `verify-typed` — check the typed data a maker signs
-
-The "Allow off-chain signing" mode: the wallet asks for an `eth_signTypedData_v4` signature
-over your whole offer tree. Save that JSON to a file (it's a file argument, not inline hex):
+Useful assertions:
 
 ```sh
-nocturne-verify verify-typed payload.json
-nocturne-verify verify-typed payload.json --offers offer1.json offer2.json   # assert intent
+nocturne-verify verify 0x<calldata> \
+  --expected-maker 0x<maker> \
+  --chain-id 8453 \
+  --now 1780000000
 ```
 
-Prints every offer, proves the document is the canonical encoding of those offers (no hidden
-fields, no tampered types — the printed DIGEST is exactly what the wallet will hash), and
-flags zero-offer padding leaves as untakeable.
+`--now` makes expiry and displayed APR calculations explicit.
 
-## `digest` — predict the digest from your own terms
+### Maker root ratification
 
-The strongest check: it never reads the app's output at all. Feed in the offers you intend
-(JSON files, order = leaf order) and compare what the tool computes against what the wallet
-shows — ideally on a separate machine.
+A SetterRatifier transaction approves one opaque root. Supply the maker's intended offers in leaf
+order to prove that the root commits to exactly those terms:
 
 ```sh
-nocturne-verify digest offer1.json offer2.json                     # print root + digest
-nocturne-verify digest ... --expect 0xWalletDigest                 # assert the digest
-nocturne-verify digest ... --expect-root 0xRootFromWallet          # assert just the root
-nocturne-verify digest ... --eip712                                # emit the full typed data
+nocturne-verify verify 0x<setIsRootRatified-calldata> \
+  --offers offer1.json offer2.json
 ```
 
-## `decode` — just read a payload
+Without `--offers`, the root can be decoded but its intended leaves cannot be established offline,
+so the result is `PARTIAL`.
+
+## Verify a typed-data signing request
+
+`verify-typed` accepts the complete `eth_signTypedData_v4` JSON document as a file:
 
 ```sh
-nocturne-verify decode 0x<payload>              # auto-detects the type
-nocturne-verify decode 0x... --type market-state # getter returns have no selector; name one
-nocturne-verify decode 0x... --json             # machine-readable
+nocturne-verify verify-typed typed-data.json
+nocturne-verify verify-typed typed-data.json --offers offer1.json offer2.json
 ```
 
-Types: `take`, `bundle`, `offer`, `ratifier`, `cancel`, `ratify`, `market-state`, `position`.
+It prints every real leaf, identifies zero-offer padding, verifies the EIP-712 type table and
+canonical document shape, rebuilds the Merkle tree, and prints the exact digest a conforming wallet
+will hash. `--offers` additionally asserts that the real leaves equal independently recorded offer
+terms in the same order.
 
-## Scope
+## Reproduce a digest from intended terms
 
-Offline, read-only, contract-anchored ([fixtures](../nocturne/fixtures/README.md)). Not an
-on-chain simulation of `take`, and not security-audited — verify against your own deployment
-before relying on it with real value.
+`digest` begins with offer JSON rather than application-generated calldata or typed data:
+
+```sh
+nocturne-verify digest offer1.json offer2.json
+nocturne-verify digest offer1.json offer2.json --expect 0x<wallet-digest>
+nocturne-verify digest offer1.json offer2.json --expect-root 0x<wallet-root>
+nocturne-verify digest offer1.json offer2.json --eip712
+```
+
+| Option | Result |
+|---|---|
+| no assertion | Print the canonical root and EIP-712 digest |
+| `--expect` | Fail unless the computed digest matches |
+| `--expect-root` | Fail unless the computed root matches |
+| `--eip712` | Emit the complete canonical typed-data JSON document |
+
+For maximum separation, create the offer files from your own records and run this command on a
+different machine from the application requesting the signature.
+
+## Decode without verifying
+
+`decode` is the inspection-only path:
+
+```sh
+nocturne-verify decode 0x<payload>
+nocturne-verify decode 0x<getter-return> --type market-state
+nocturne-verify decode 0x<payload> --json
+```
+
+Supported explicit types are `take`, `bundle`, `offer`, `ratifier`, `cancel`, `ratify`,
+`market-state`, and `position`. Selector-bearing calldata is normally detected automatically;
+getter return data needs `--type` because it has no selector.
+
+## Exit codes
+
+| Code | Meaning |
+|---:|---|
+| `0` | `PASS`: every requested and locally available check passed |
+| `1` | `FAIL`: at least one check failed or the input was invalid |
+| `2` | `PARTIAL`: nothing failed, but an intent or on-chain-state check remains unavailable offline |
+
+Automation should treat both `1` and `2` as incomplete approval unless its policy explicitly
+handles the missing `PARTIAL` checks.
+
+## Trust and security boundaries
+
+The verifier proves that the bytes it parsed correspond to the terms it prints. Only the signer or
+taker can decide whether those terms match their intent. Supplying `--offers` or an expected digest
+makes that intent comparison mechanical instead of visual.
+
+The CLI is parity-tested against contract-generated fixtures and production payload shapes, but it
+is an early v0.1.0 release and is not independently security-audited. It is not an on-chain
+simulation of `take`; use the SDK's simulation APIs and current chain state for execution analysis.
 
 ## License
 
