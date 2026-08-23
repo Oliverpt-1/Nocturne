@@ -715,7 +715,8 @@ fn digest_expect_root_matches_and_mismatches() {
 // ---- EIP-712 typed-data (maker off-chain signing) payloads -----------------------
 
 fn write_temp(name: &str, contents: &str) -> String {
-    let p = std::env::temp_dir().join(format!("nocturne_{}_{name}", std::process::id()));
+    let nonce = NEXT_TEMP_NONCE.fetch_add(1, Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!("nocturne_{}_{nonce}_{name}", std::process::id()));
     std::fs::write(&p, contents).unwrap();
     p.to_str().unwrap().to_string()
 }
