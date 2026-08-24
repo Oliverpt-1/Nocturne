@@ -96,6 +96,11 @@ Nocturne emphasizes deterministic offchain construction, validation, and simulat
 possible. Most SDK behavior can be developed and tested locally without funding a wallet; Anvil
 and live-chain tests are reserved for the integration boundaries that require them.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow,
+testing expectations, and pull request guidelines.
+
 ## Getting help
 
 - Join the [Telegram chat](https://t.me/+tc58eLgH-dU1ZTJh) for questions and discussion.
