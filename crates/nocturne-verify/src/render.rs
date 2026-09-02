@@ -293,6 +293,88 @@ pub fn take_text(t: &TakeCall, now: Option<u64>) -> String {
     s
 }
 
+/// Render a decoded repay-and-withdraw position-management call.
+pub fn repay_withdraw_text(r: &RepayWithdrawCall) -> String {
+    let mut s = String::new();
+    s.push_str("repay and withdraw:\n");
+    s.push_str(&format!(
+        "  chain id            : {}\n",
+        u256_dec(&r.market.chain_id)
+    ));
+    s.push_str(&format!(
+        "  midnight            : {}\n",
+        checksum(&r.market.midnight)
+    ));
+    s.push_str(&format!(
+        "  loan token          : {}\n",
+        checksum(&r.market.loan_token)
+    ));
+    s.push_str(&format!(
+        "  maturity            : {}\n",
+        u256_ts(&word_to_u256(&r.market.maturity))
+    ));
+    s.push_str(&format!(
+        "  rcf threshold       : {}\n",
+        u256_dec(&r.market.rcf_threshold)
+    ));
+    s.push_str(&format!(
+        "  enter gate          : {}\n",
+        checksum(&r.market.enter_gate)
+    ));
+    s.push_str(&format!(
+        "  liquidator gate     : {}\n",
+        checksum(&r.market.liquidator_gate)
+    ));
+    s.push_str(&format!(
+        "  collateral params   : {}\n",
+        r.market.collateral_params.len()
+    ));
+    for (i, cp) in r.market.collateral_params.iter().enumerate() {
+        s.push_str(&format!(
+            "    [{i}] token={} lltv={} cursor={} oracle={}\n",
+            checksum(&cp.token),
+            u256_dec(&cp.lltv),
+            u256_dec(&cp.liquidation_cursor),
+            checksum(&cp.oracle),
+        ));
+    }
+    s.push_str(&format!("  repay assets        : {}\n", r.repay_assets));
+    s.push_str(&format!(
+        "  on behalf           : {}\n",
+        checksum(&r.on_behalf)
+    ));
+    s.push_str(&format!(
+        "  loan token permit   : {}\n",
+        permit_str(&r.loan_token_permit)
+    ));
+    s.push_str(&format!(
+        "  collateral withdrawals : {}\n",
+        r.collateral_withdrawals.len()
+    ));
+    for (i, withdrawal) in r.collateral_withdrawals.iter().enumerate() {
+        s.push_str(&format!(
+            "    [{i}] index={} assets={}\n",
+            withdrawal.collateral_index, withdrawal.assets
+        ));
+    }
+    s.push_str(&format!(
+        "  collateral receiver : {}\n",
+        checksum(&r.collateral_receiver)
+    ));
+    s.push_str(&format!("  referral fee pct    : {}\n", r.referral_fee_pct));
+    if r.referral_fee_pct != U256::ZERO {
+        s.push_str(&format!(
+            "  referral recipient  : {}\n",
+            checksum(&r.referral_fee_recipient)
+        ));
+    }
+    s.push_str(&format!(
+        "  deadline            : {}\n",
+        u256_ts(&r.deadline)
+    ));
+    s
+}
+
 /// Human label for a `TokenPermit`.
 fn permit_str(p: &TokenPermit) -> String {
     let kind = match p.kind {
@@ -413,23 +495,27 @@ pub fn bundle_text(b: &BundleCall, now: Option<u64>) -> String {
 
 // ---- JSON builders -----------------------------------------------------------
 
+fn market_json(m: &Market) -> Value {
+    json!({
+        "chainId": u256_dec(&m.chain_id),
+        "midnight": checksum(&m.midnight),
+        "loanToken": checksum(&m.loan_token),
+        "maturity": u256_dec(&m.maturity),
+        "rcfThreshold": u256_dec(&m.rcf_threshold),
+        "enterGate": checksum(&m.enter_gate),
+        "liquidatorGate": checksum(&m.liquidator_gate),
+        "collateralParams": m.collateral_params.iter().map(|cp| json!({
+            "token": checksum(&cp.token),
+            "lltv": u256_dec(&cp.lltv),
+            "liquidationCursor": u256_dec(&cp.liquidation_cursor),
+            "oracle": checksum(&cp.oracle),
+        })).collect::<Vec<_>>(),
+    })
+}
+
 pub fn offer_json(o: &Offer) -> Value {
     json!({
-        "market": {
-            "chainId": u256_dec(&o.market.chain_id),
-            "midnight": checksum(&o.market.midnight),
-            "loanToken": checksum(&o.market.loan_token),
-            "maturity": u256_dec(&o.market.maturity),
-            "rcfThreshold": u256_dec(&o.market.rcf_threshold),
-            "enterGate": checksum(&o.market.enter_gate),
-            "liquidatorGate": checksum(&o.market.liquidator_gate),
-            "collateralParams": o.market.collateral_params.iter().map(|cp| json!({
-                "token": checksum(&cp.token),
-                "lltv": u256_dec(&cp.lltv),
-                "liquidationCursor": u256_dec(&cp.liquidation_cursor),
-                "oracle": checksum(&cp.oracle),
-            })).collect::<Vec<_>>(),
-        },
+        "market": market_json(&o.market),
         "buy": o.buy,
         "maker": checksum(&o.maker),
         "start": u256_dec(&o.start),
@@ -484,6 +570,27 @@ pub fn take_json(t: &TakeCall) -> Value {
         "receiverIfTakerIsSeller": checksum(&t.receiver_if_taker_is_seller),
         "takerCallback": checksum(&t.taker_callback),
         "takerCallbackData": hex_bytes(&t.taker_callback_data),
+    })
+}
+
+pub fn repay_withdraw_json(r: &RepayWithdrawCall) -> Value {
+    json!({
+        "function": "midnightBundlesV1RepayAndWithdrawCollateral",
+        "market": market_json(&r.market),
+        "repayAssets": r.repay_assets.to_string(),
+        "onBehalf": checksum(&r.on_behalf),
+        "loanTokenPermit": {
+            "kind": r.loan_token_permit.kind,
+            "data": hex_bytes(&r.loan_token_permit.data),
+        },
+        "collateralWithdrawals": r.collateral_withdrawals.iter().map(|w| json!({
+            "collateralIndex": w.collateral_index.to_string(),
+            "assets": w.assets.to_string(),
+        })).collect::<Vec<_>>(),
+        "collateralReceiver": checksum(&r.collateral_receiver),
+        "referralFeePct": r.referral_fee_pct.to_string(),
+        "referralFeeRecipient": checksum(&r.referral_fee_recipient),
+        "deadline": r.deadline.to_string(),
     })
 }
 

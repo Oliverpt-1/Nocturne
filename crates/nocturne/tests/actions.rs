@@ -340,6 +340,28 @@ fn repay_withdraw_builder_matches_current_sdk_bundle_shape() {
     }
     .abi_encode();
     assert_eq!(tx.data, expected);
+
+    let decoded = decode_repay_withdraw_collateral_calldata(&expected).unwrap();
+    assert_eq!(
+        decoded,
+        RepayWithdrawCall {
+            market,
+            repay_assets: U256::from(500_000u64),
+            on_behalf: owner,
+            loan_token_permit: TokenPermit {
+                kind: 0,
+                data: Vec::new(),
+            },
+            collateral_withdrawals: vec![CollateralWithdrawal {
+                collateral_index: U256::ZERO,
+                assets: U256::from(2_000u64),
+            }],
+            collateral_receiver: owner,
+            referral_fee_pct: U256::ZERO,
+            referral_fee_recipient: [0; 20],
+            deadline: U256::from(1_798_000_000u64),
+        }
+    );
 }
 
 #[test]

@@ -9,6 +9,7 @@ proofs, and digests that those bytes commit to.
 Use `nocturne-verify` when an application or wallet gives you data that is difficult to review:
 
 - Taker `take` or bundle calldata.
+- Position-management calldata for `repayAndWithdrawCollateral`.
 - Maker `setIsRootRatified` calldata.
 - EIP-712 typed data for an off-chain offer-tree signature.
 - A compressed maker-offer mempool payload.
@@ -134,8 +135,12 @@ nocturne-verify decode 0x<payload> --json
 ```
 
 Supported explicit types are `take`, `bundle`, `offer`, `ratifier`, `cancel`, `ratify`,
-`market-state`, and `position`. Selector-bearing calldata is normally detected automatically;
-getter return data needs `--type` because it has no selector.
+`repay-withdraw`, `market-state`, and `position`. Selector-bearing calldata is normally detected
+automatically; getter return data needs `--type` because it has no selector.
+
+`repay-withdraw` decodes the `midnightBundlesV1RepayAndWithdrawCollateral` position-management
+call, including its market, repayment amount, permit, collateral withdrawals, receiver, referral
+fields, and deadline.
 
 ## Exit codes
 
