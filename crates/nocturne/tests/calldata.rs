@@ -1,10 +1,11 @@
 //! Round-trip tests for the calldata decoders (`decode_take_calldata`, `decode_ratifier_data`,
 //! `decode_cancel_root_calldata`).
 //!
-//! The encoders (`encode_take_calldata` / `encode_ratifier_data` / `encode_cancel_root_calldata`)
-//! are already asserted byte-for-byte against the Midnight contracts in `tests/codec.rs`, so
-//! encoding with them and decoding back is a parity check on the decoders: if a decoder disagrees
-//! with its verified inverse, the round-trip breaks.
+//! The existing take/ratifier/cancel encoders are asserted byte-for-byte against the Midnight
+//! contracts in `tests/codec.rs`; the repay-and-withdraw encoder is independently checked against
+//! Alloy's Solidity ABI bindings in `tests/actions.rs`. Encoding with those verified encoders and
+//! decoding back is therefore a parity check on the decoders: if a decoder disagrees with its
+//! inverse, the round-trip breaks.
 
 use nocturne::*;
 
@@ -113,6 +114,59 @@ fn take_calldata_round_trips() {
     assert_eq!(rd.sig, sig);
     assert_eq!(rd.root, tree.root());
     assert_eq!(rd.proof, proof);
+}
+
+#[test]
+fn repay_withdraw_calldata_round_trips() {
+    let market = offer_for([0x42; 20]).market;
+    let on_behalf = [0x77; 20];
+    let collateral_receiver = [0x88; 20];
+    let referral_fee_recipient = [0x99; 20];
+    let loan_token_permit = TokenPermit {
+        kind: 2,
+        data: vec![0xde, 0xad, 0xbe, 0xef, 0x01],
+    };
+    let collateral_withdrawals = vec![
+        CollateralWithdrawal {
+            collateral_index: U256::ZERO,
+            assets: U256::from(250u64),
+        },
+        CollateralWithdrawal {
+            collateral_index: U256::ZERO,
+            assets: U256::from(500u64),
+        },
+    ];
+    let repay_assets = U256::from(1_000u64);
+    let referral_fee_pct = U256::from(25_000_000_000_000_000u64);
+    let deadline = U256::from(4_000_000_000u64);
+
+    let calldata = encode_repay_withdraw_collateral_calldata(
+        &market,
+        repay_assets,
+        &on_behalf,
+        &loan_token_permit,
+        &collateral_withdrawals,
+        &collateral_receiver,
+        referral_fee_pct,
+        &referral_fee_recipient,
+        deadline,
+    );
+    let decoded = decode_repay_withdraw_collateral_calldata(&calldata).unwrap();
+
+    assert_eq!(
+        decoded,
+        RepayWithdrawCall {
+            market,
+            repay_assets,
+            on_behalf,
+            loan_token_permit,
+            collateral_withdrawals,
+            collateral_receiver,
+            referral_fee_pct,
+            referral_fee_recipient,
+            deadline,
+        }
+    );
 }
 
 #[test]
@@ -263,6 +317,49 @@ fn truncated_calldata_errors_not_panics() {
     assert!(decode_take_calldata(&bytes).is_err());
     // Shorter than a selector.
     assert!(decode_take_calldata(&[0x6a, 0x14]).is_err());
+}
+
+#[test]
+fn repay_withdraw_malformed_calldata_is_rejected() {
+    let market = offer_for([0x42; 20]).market;
+    let calldata = encode_repay_withdraw_collateral_calldata(
+        &market,
+        U256::from(1u64),
+        &[0x77; 20],
+        &TokenPermit {
+            kind: 0,
+            data: Vec::new(),
+        },
+        &[],
+        &[0x88; 20],
+        U256::ZERO,
+        &[0u8; 20],
+        U256::MAX,
+    );
+
+    let truncated = calldata[..4 + 9 * 32].to_vec();
+    assert!(matches!(
+        decode_repay_withdraw_collateral_calldata(&truncated),
+        Err(DecodeError::TooShort { .. })
+    ));
+
+    // A copied transaction can be truncated at any byte boundary; none should panic.
+    for len in 0..calldata.len() {
+        let _ = decode_repay_withdraw_collateral_calldata(&calldata[..len]);
+    }
+
+    let mut overflowing_offset = calldata.clone();
+    overflowing_offset[4..36].copy_from_slice(&[0xff; 32]);
+    assert_eq!(
+        decode_repay_withdraw_collateral_calldata(&overflowing_offset),
+        Err(DecodeError::IntegerOverflow)
+    );
+
+    let cancel = encode_cancel_root_calldata(&[0x33; 20], &word_from_u64(1));
+    assert_eq!(
+        decode_repay_withdraw_collateral_calldata(&cancel),
+        Err(DecodeError::BadSelector(CANCEL_ROOT_SELECTOR))
+    );
 }
 
 #[test]

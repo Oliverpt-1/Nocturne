@@ -98,6 +98,28 @@ fn run(args: &[&str]) -> (String, String, i32) {
     )
 }
 
+fn repay_withdraw_payload() -> String {
+    let market = offer_for([0; 20]).market;
+    let calldata = encode_repay_withdraw_collateral_calldata(
+        &market,
+        U256::from(1_000u64),
+        &[0x77; 20],
+        &TokenPermit {
+            kind: 2,
+            data: vec![0xde, 0xad, 0xbe, 0xef],
+        },
+        &[CollateralWithdrawal {
+            collateral_index: U256::ZERO,
+            assets: U256::from(2_000u64),
+        }],
+        &[0x88; 20],
+        U256::ZERO,
+        &[0u8; 20],
+        U256::from(4_000_000_000u64),
+    );
+    format!("0x{}", hex::encode(calldata))
+}
+
 #[test]
 fn decode_take_shows_terms() {
     let (hex, _offer, _) = signed_take();
@@ -117,6 +139,38 @@ fn decode_json_is_valid_json() {
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
     assert_eq!(v["offer"]["buy"], serde_json::Value::Bool(true));
     assert_eq!(v["units"], serde_json::Value::String("250000".to_string()));
+}
+
+#[test]
+fn decode_repay_withdraw_auto_detects_and_shows_terms() {
+    let payload = repay_withdraw_payload();
+    let (stdout, stderr, code) = run(&["decode", &payload]);
+    assert_eq!(code, 0, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("midnightBundlesV1RepayAndWithdrawCollateral"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("repay assets        : 1000"), "{stdout}");
+    assert!(stdout.contains("collateral withdrawals : 1"), "{stdout}");
+    assert!(
+        stdout.contains("deadline            : 4000000000"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn decode_repay_withdraw_json_is_valid() {
+    let payload = repay_withdraw_payload();
+    let (stdout, stderr, code) = run(&["decode", &payload, "--type", "repay-withdraw", "--json"]);
+    assert_eq!(code, 0, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(
+        value["function"],
+        "midnightBundlesV1RepayAndWithdrawCollateral"
+    );
+    assert_eq!(value["repayAssets"], "1000");
+    assert_eq!(value["loanTokenPermit"]["kind"], 2);
+    assert_eq!(value["collateralWithdrawals"].as_array().unwrap().len(), 1);
 }
 
 #[test]
