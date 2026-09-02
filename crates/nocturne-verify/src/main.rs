@@ -4,7 +4,8 @@
 //! (or a wall of hex) cannot tell what they are about to authorize. This tool reproduces, entirely
 //! offline, the two things that matter:
 //!
-//! * **what the bytes say** - decode a `take` payload / offer / ratifier blob into readable terms;
+//! * **what the bytes say** - decode a `take`, position-action, offer, or ratifier payload into
+//!   readable terms;
 //! * **what the signature commits to** - reproduce the Merkle root and the EIP-712 digest, and
 //!   confirm the signature recovers to the intended maker.
 //!
@@ -35,8 +36,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Decode a raw payload (take or bundle calldata, offer, ratifier data, or a getter
-    /// return) into human-readable terms.
+    /// Decode a raw payload (take, bundle, position-action calldata, offer, ratifier data, or a
+    /// getter return) into human-readable terms.
     Decode {
         /// The payload as hex (`0x`-prefixed or not).
         payload: String,
@@ -119,6 +120,7 @@ enum PayloadType {
     Ratifier,
     Cancel,
     Ratify,
+    RepayWithdraw,
     MarketState,
     Position,
 }
@@ -234,6 +236,15 @@ fn cmd_decode(
                         "UNRATIFY - revoke every offer under this root"
                     }
                 );
+            }
+        }
+        PayloadType::RepayWithdraw => {
+            let r = decode_repay_withdraw_collateral_calldata(&bytes).map_err(|e| e.to_string())?;
+            if json {
+                print_json(&render::repay_withdraw_json(&r));
+            } else {
+                println!("Decoded midnightBundlesV1RepayAndWithdrawCollateral(...) payload\n");
+                print!("{}", render::repay_withdraw_text(&r));
             }
         }
         PayloadType::Cancel => {
@@ -819,6 +830,9 @@ fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
         }
         if sel == SET_IS_ROOT_RATIFIED_SELECTOR {
             return Ok(PayloadType::Ratify);
+        }
+        if sel == BUNDLE_REPAY_WITHDRAW_SELECTOR {
+            return Ok(PayloadType::RepayWithdraw);
         }
         if BundleKind::from_selector(sel).is_some() {
             return Ok(PayloadType::Bundle);
