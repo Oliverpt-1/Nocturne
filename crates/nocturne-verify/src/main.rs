@@ -112,7 +112,7 @@ enum Command {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum PayloadType {
     Take,
     Bundle,
@@ -123,6 +123,80 @@ enum PayloadType {
     RepayWithdraw,
     MarketState,
     Position,
+}
+
+/// One selector-bearing call the CLI recognizes.
+///
+/// Adding a call means adding one row here. Both [`detect`] and the `verify` dispatch read it.
+/// Selector-less payloads are absent: a bare offer is found by trial decoding, and getter
+/// returns need `--type`.
+struct SelectorEntry {
+    selector: [u8; 4],
+    kind: PayloadType,
+    /// Pins SDK function names in the drift test.
+    #[allow(dead_code)]
+    function: &'static str,
+}
+
+const SELECTOR_REGISTRY: &[SelectorEntry] = &[
+    SelectorEntry {
+        selector: TAKE_SELECTOR,
+        kind: PayloadType::Take,
+        function: "take",
+    },
+    SelectorEntry {
+        selector: CANCEL_ROOT_SELECTOR,
+        kind: PayloadType::Cancel,
+        function: "cancelRoot",
+    },
+    SelectorEntry {
+        selector: SET_IS_ROOT_RATIFIED_SELECTOR,
+        kind: PayloadType::Ratify,
+        function: "setIsRootRatified",
+    },
+    SelectorEntry {
+        selector: BUNDLE_REPAY_WITHDRAW_SELECTOR,
+        kind: PayloadType::RepayWithdraw,
+        function: "midnightBundlesV1RepayAndWithdrawCollateral",
+    },
+    SelectorEntry {
+        selector: BUNDLE_BUY_UNITS_SELECTOR,
+        kind: PayloadType::Bundle,
+        function: "midnightBundlesV1BuyWithUnitsTargetAndWithdrawCollateral",
+    },
+    SelectorEntry {
+        selector: BUNDLE_SELL_UNITS_SELECTOR,
+        kind: PayloadType::Bundle,
+        function: "midnightBundlesV1SupplyCollateralAndSellWithUnitsTarget",
+    },
+    SelectorEntry {
+        selector: BUNDLE_BUY_ASSETS_SELECTOR,
+        kind: PayloadType::Bundle,
+        function: "midnightBundlesV1BuyWithAssetsTargetAndWithdrawCollateral",
+    },
+    SelectorEntry {
+        selector: BUNDLE_SELL_ASSETS_SELECTOR,
+        kind: PayloadType::Bundle,
+        function: "midnightBundlesV1SupplyCollateralAndSellWithAssetsTarget",
+    },
+];
+
+/// The leading 4-byte selector of a payload, if it is long enough to carry one.
+fn leading_selector(bytes: &[u8]) -> Option<[u8; 4]> {
+    (bytes.len() >= 4).then(|| [bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// The payload kind a selector routes to, or `None` if it is not registered.
+fn selector_kind(selector: [u8; 4]) -> Option<PayloadType> {
+    SELECTOR_REGISTRY
+        .iter()
+        .find(|entry| entry.selector == selector)
+        .map(|entry| entry.kind)
+}
+
+/// The registered kind of a payload, from its leading selector.
+fn payload_kind(bytes: &[u8]) -> Option<PayloadType> {
+    leading_selector(bytes).and_then(selector_kind)
 }
 
 fn main() -> ExitCode {
@@ -287,14 +361,13 @@ fn cmd_verify(
     offers: &[std::path::PathBuf],
 ) -> Result<ExitCode, String> {
     let bytes = parse_hex(payload)?;
-    if bytes.len() >= 4 {
-        let sel = [bytes[0], bytes[1], bytes[2], bytes[3]];
-        if BundleKind::from_selector(sel).is_some() {
-            return cmd_verify_bundle(&bytes, chain_id, expected_maker, now);
+    // Bundle and ratify have their own reports. Everything else falls through to the take path.
+    match payload_kind(&bytes) {
+        Some(PayloadType::Bundle) => {
+            return cmd_verify_bundle(&bytes, chain_id, expected_maker, now)
         }
-        if sel == SET_IS_ROOT_RATIFIED_SELECTOR {
-            return cmd_verify_ratify(&bytes, offers);
-        }
+        Some(PayloadType::Ratify) => return cmd_verify_ratify(&bytes, offers),
+        _ => {}
     }
     let t = decode_take_calldata(&bytes).map_err(|e| e.to_string())?;
 
@@ -820,24 +893,11 @@ fn check(ok: &mut bool, pass: bool, label: &str) {
 }
 
 fn detect(bytes: &[u8]) -> Result<PayloadType, String> {
-    if bytes.len() >= 4 {
-        let sel = [bytes[0], bytes[1], bytes[2], bytes[3]];
-        if sel == TAKE_SELECTOR {
-            return Ok(PayloadType::Take);
-        }
-        if sel == CANCEL_ROOT_SELECTOR {
-            return Ok(PayloadType::Cancel);
-        }
-        if sel == SET_IS_ROOT_RATIFIED_SELECTOR {
-            return Ok(PayloadType::Ratify);
-        }
-        if sel == BUNDLE_REPAY_WITHDRAW_SELECTOR {
-            return Ok(PayloadType::RepayWithdraw);
-        }
-        if BundleKind::from_selector(sel).is_some() {
-            return Ok(PayloadType::Bundle);
-        }
+    if let Some(kind) = payload_kind(bytes) {
+        return Ok(kind);
     }
+    // No selector: a bare offer is only found by decoding it. Getter returns look alike, so
+    // they are never guessed and need `--type`.
     if decode_offer(bytes).is_ok() {
         return Ok(PayloadType::Offer);
     }
@@ -887,4 +947,59 @@ fn parse_word(s: &str) -> Result<Word, String> {
     let mut w = [0u8; 32];
     w.copy_from_slice(&b);
     Ok(w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_selectors_are_unique() {
+        for (i, a) in SELECTOR_REGISTRY.iter().enumerate() {
+            for b in &SELECTOR_REGISTRY[i + 1..] {
+                assert_ne!(
+                    a.selector, b.selector,
+                    "{} and {} share a selector",
+                    a.function, b.function
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_registered_selector_auto_detects() {
+        for entry in SELECTOR_REGISTRY {
+            let detected = detect(&entry.selector)
+                .unwrap_or_else(|e| panic!("{} did not auto-detect: {e}", entry.function));
+            assert_eq!(
+                detected, entry.kind,
+                "{} routed to the wrong kind",
+                entry.function
+            );
+        }
+    }
+
+    #[test]
+    fn unregistered_input_does_not_auto_detect() {
+        assert!(detect(&[0xde, 0xad, 0xbe, 0xef]).is_err());
+        assert!(detect(&[]).is_err());
+    }
+
+    /// The CLI registry is separate from `BundleKind::from_selector`, so pin the two together.
+    #[test]
+    fn every_bundle_kind_stays_registered() {
+        for kind in [
+            BundleKind::BuyWithUnitsTarget,
+            BundleKind::SellWithUnitsTarget,
+            BundleKind::BuyWithAssetsTarget,
+            BundleKind::SellWithAssetsTarget,
+        ] {
+            let entry = SELECTOR_REGISTRY
+                .iter()
+                .find(|entry| entry.selector == kind.selector())
+                .unwrap_or_else(|| panic!("{} is missing from the registry", kind.function_name()));
+            assert_eq!(entry.kind, PayloadType::Bundle);
+            assert_eq!(entry.function, kind.function_name());
+        }
+    }
 }
