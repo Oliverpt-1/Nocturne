@@ -583,6 +583,65 @@ pub fn decode_take_calldata(bytes: &[u8]) -> Result<TakeCall, DecodeError> {
     })
 }
 
+/// A decoded `MidnightBundlesV1.midnightBundlesV1RepayAndWithdrawCollateral` call - the inverse
+/// of [`encode_repay_withdraw_collateral_calldata`](crate::encode_repay_withdraw_collateral_calldata).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepayWithdrawCall {
+    /// The market whose position is being updated.
+    pub market: Market,
+    /// Loan-token assets repaid by the position owner.
+    pub repay_assets: U256,
+    /// The position owner on whose behalf the action executes.
+    pub on_behalf: Address,
+    /// Permit authorizing the loan-token transfer.
+    pub loan_token_permit: TokenPermit,
+    /// Collateral assets withdrawn after repayment.
+    pub collateral_withdrawals: Vec<CollateralWithdrawal>,
+    /// Receiver of withdrawn collateral.
+    pub collateral_receiver: Address,
+    /// Referral fee percentage (WAD-scaled).
+    pub referral_fee_pct: U256,
+    /// Referral fee recipient.
+    pub referral_fee_recipient: Address,
+    /// Unix deadline for bundle execution.
+    pub deadline: U256,
+}
+
+/// Decode raw `MidnightBundlesV1.midnightBundlesV1RepayAndWithdrawCollateral(...)` calldata into
+/// a [`RepayWithdrawCall`].
+///
+/// The call contains a dynamic `Market` tuple, a dynamic `TokenPermit`, and a static-tuple
+/// `CollateralWithdrawal[]`. Trailing metadata bytes appended by applications are tolerated, as
+/// with the other calldata decoders in this module.
+pub fn decode_repay_withdraw_collateral_calldata(
+    bytes: &[u8],
+) -> Result<RepayWithdrawCall, DecodeError> {
+    let args = strip_selector(bytes, crate::BUNDLE_REPAY_WITHDRAW_SELECTOR)?;
+    // Head: [market, assets, onBehalf, loanTokenPermit, collateralWithdrawals,
+    //        collateralReceiver, referralFeePct, referralFeeRecipient, deadline]
+    let market_off = word_to_usize(&head_word(args, 0, 0)?)?;
+    let repay_assets = word_to_u256(&head_word(args, 0, 1)?);
+    let on_behalf = word_to_address(&head_word(args, 0, 2)?);
+    let permit_off = word_to_usize(&head_word(args, 0, 3)?)?;
+    let withdrawals_off = word_to_usize(&head_word(args, 0, 4)?)?;
+    let collateral_receiver = word_to_address(&head_word(args, 0, 5)?);
+    let referral_fee_pct = word_to_u256(&head_word(args, 0, 6)?);
+    let referral_fee_recipient = word_to_address(&head_word(args, 0, 7)?);
+    let deadline = word_to_u256(&head_word(args, 0, 8)?);
+
+    Ok(RepayWithdrawCall {
+        market: decode_market_tuple(args, market_off)?,
+        repay_assets,
+        on_behalf,
+        loan_token_permit: decode_token_permit(args, permit_off)?,
+        collateral_withdrawals: decode_collateral_withdrawals(args, withdrawals_off)?,
+        collateral_receiver,
+        referral_fee_pct,
+        referral_fee_recipient,
+        deadline,
+    })
+}
+
 // ---- bundle calldata decoding --------------------------------------------------
 
 /// Which `IMidnightBundles` fill function a bundle payload calls.
