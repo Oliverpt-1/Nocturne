@@ -37,6 +37,16 @@ pub fn checksum(addr: &Address) -> String {
     out
 }
 
+/// Canonical JSON representation for an EVM address.
+fn address_json(addr: &Address) -> Value {
+    Value::String(checksum(addr))
+}
+
+/// Canonical JSON representation for opaque bytes.
+fn bytes_json(bytes: &[u8]) -> Value {
+    Value::String(hex_bytes(bytes))
+}
+
 /// Format a Unix timestamp as `YYYY-MM-DD HH:MM:SS UTC` (proleptic Gregorian, no leap seconds).
 pub fn fmt_ts(ts: u64) -> String {
     let days = (ts / 86_400) as i64;
@@ -62,7 +72,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 /// A `Word` holding a small-enough tick as `u64`.
 fn tick_of(w: &Word) -> Option<u64> {
-    word_to_u128(w).map(|v| v as u64)
+    word_to_u128(w).and_then(|v| u64::try_from(v).ok())
 }
 
 /// A WAD-scaled price (1e18 == 1.0) rendered as a decimal, falling back to the raw integer.
@@ -77,26 +87,128 @@ fn price_str(tick: u64) -> String {
 }
 
 /// APR implied by a tick, given an optional reference `now` and the market maturity.
-fn apr_str(tick: u64, now: Option<u64>, maturity: u64) -> String {
-    match now {
-        Some(n) if n < maturity => match tick_to_apr(tick, maturity - n) {
+fn apr_str(tick: u64, now: Option<u64>, maturity: Option<u64>) -> String {
+    match (now, maturity) {
+        (Some(n), Some(maturity)) if n < maturity => match tick_to_apr(tick, maturity - n) {
             Ok(a) => format!("{:.4}% (ttm {} days)", a, (maturity - n) / 86_400),
             Err(e) => format!("(apr error: {e})"),
         },
-        Some(_) => "(already matured)".to_string(),
-        None => "(pass --now <unix> to compute)".to_string(),
+        (Some(_), Some(_)) => "(already matured)".to_string(),
+        (Some(_), None) => "(maturity too large)".to_string(),
+        (None, _) => "(pass --now <unix> to compute)".to_string(),
     }
 }
 
-fn u256_dec(w: &Word) -> String {
-    word_to_u256(w).to_string()
+/// Render a large numeric value without losing precision in text output or JSON.
+///
+/// JSON consumers receive decimal strings for all integer values. This keeps values larger than
+/// JavaScript's safe integer range lossless and is also the representation used by the existing
+/// CLI output.
+fn decimal_text(value: impl std::fmt::Display) -> String {
+    value.to_string()
+}
+
+fn decimal_json(value: impl std::fmt::Display) -> Value {
+    Value::String(decimal_text(value))
+}
+
+fn u256_text(value: &U256) -> String {
+    decimal_text(value)
+}
+
+fn word_text(word: &Word) -> String {
+    u256_text(&word_to_u256(word))
+}
+
+fn u256_json(value: &U256) -> Value {
+    decimal_json(value)
+}
+
+fn word_json(word: &Word) -> Value {
+    u256_json(&word_to_u256(word))
 }
 
 fn u64_of(w: &Word) -> Option<u64> {
-    word_to_u128(w).map(|v| v as u64)
+    word_to_u128(w).and_then(|v| u64::try_from(v).ok())
 }
 
 // ---- text renderers ----------------------------------------------------------
+
+/// Preformatted shared market values. Payload renderers own the field ordering and contextual
+/// labels while this helper keeps the underlying address, byte, and numeric formatting canonical.
+/// `maturity` is a Unix timestamp; collateral amounts elsewhere in the report remain token-native
+/// base units, while percentage-like fields such as `lltv` are WAD values (1e18 == 100%). Other
+/// protocol integers, including `rcfThreshold`, remain raw decimal values.
+struct MarketText {
+    chain_id: String,
+    midnight: String,
+    loan_token: String,
+    maturity: String,
+    rcf_threshold: String,
+    enter_gate: String,
+    liquidator_gate: String,
+    collateral_params: Vec<String>,
+}
+
+fn market_text(m: &Market) -> MarketText {
+    MarketText {
+        chain_id: word_text(&m.chain_id),
+        midnight: checksum(&m.midnight),
+        loan_token: checksum(&m.loan_token),
+        maturity: u256_ts(&word_to_u256(&m.maturity)),
+        rcf_threshold: word_text(&m.rcf_threshold),
+        enter_gate: checksum(&m.enter_gate),
+        liquidator_gate: checksum(&m.liquidator_gate),
+        collateral_params: m
+            .collateral_params
+            .iter()
+            .map(|cp| {
+                format!(
+                    "token={} lltv={} cursor={} oracle={}",
+                    checksum(&cp.token),
+                    word_text(&cp.lltv),
+                    word_text(&cp.liquidation_cursor),
+                    checksum(&cp.oracle),
+                )
+            })
+            .collect(),
+    }
+}
+
+/// Human-readable description of a permit. The opaque permit bytes are intentionally summarized
+/// by length here; JSON output retains the complete bytes through [`permit_json`].
+fn permit_text(p: &TokenPermit) -> String {
+    let kind = match p.kind {
+        0 => "none".to_string(),
+        1 => "ERC2612".to_string(),
+        2 => "Permit2".to_string(),
+        k => format!("unknown({k})"),
+    };
+    if p.data.is_empty() {
+        kind
+    } else {
+        format!("{kind} ({} bytes)", p.data.len())
+    }
+}
+
+/// Human-readable description of a collateral withdrawal. Assets are token-native base units.
+fn withdrawal_text(w: &CollateralWithdrawal) -> String {
+    format!(
+        "index={} assets={}",
+        u256_text(&w.collateral_index),
+        u256_text(&w.assets)
+    )
+}
+
+/// Human-readable description of a collateral supply, including its transfer permit.
+fn supply_text(c: &CollateralSupply) -> String {
+    format!(
+        "index={} assets={} permit={}",
+        u256_text(&c.collateral_index),
+        u256_text(&c.assets),
+        permit_text(&c.permit)
+    )
+}
 
 /// Render a decoded offer as an indented, human-readable block.
 pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
@@ -106,18 +218,13 @@ pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
     } else {
         "SELL (maker borrows)"
     };
-    let maturity = u64_of(&o.market.maturity).unwrap_or(0);
+    let maturity = u64_of(&o.market.maturity);
     let tick = tick_of(&o.tick);
+    let market = market_text(&o.market);
 
     s.push_str("  ── security-critical ──────────────────────────────\n");
-    s.push_str(&format!(
-        "  chain id            : {}\n",
-        u256_dec(&o.market.chain_id)
-    ));
-    s.push_str(&format!(
-        "  midnight (contract) : {}\n",
-        checksum(&o.market.midnight)
-    ));
+    s.push_str(&format!("  chain id            : {}\n", market.chain_id));
+    s.push_str(&format!("  midnight (contract) : {}\n", market.midnight));
     s.push_str(&format!("  maker (signer)      : {}\n", checksum(&o.maker)));
     s.push_str(&format!(
         "  ratifier (verifier) : {}\n",
@@ -125,7 +232,7 @@ pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
     ));
     s.push_str(&format!(
         "  expiry              : {} ({})\n",
-        u256_dec(&o.expiry),
+        word_text(&o.expiry),
         u64_of(&o.expiry)
             .map(fmt_ts)
             .unwrap_or_else(|| "(large)".into())
@@ -150,35 +257,26 @@ pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
         }
         None => s.push_str(&format!(
             "  tick                : {} (oversized)\n",
-            u256_dec(&o.tick)
+            word_text(&o.tick)
         )),
     }
     s.push_str(&format!(
         "  start               : {} ({})\n",
-        u256_dec(&o.start),
+        word_text(&o.start),
         u64_of(&o.start)
             .map(fmt_ts)
             .unwrap_or_else(|| "(large)".into())
     ));
-    s.push_str(&format!(
-        "  maturity            : {} ({})\n",
-        u256_dec(&o.market.maturity),
-        u64_of(&o.market.maturity)
-            .map(fmt_ts)
-            .unwrap_or_else(|| "(large)".into())
-    ));
+    s.push_str(&format!("  maturity            : {}\n", market.maturity));
     s.push_str(&format!(
         "  group               : {}\n",
         hex_bytes(&o.group)
     ));
-    s.push_str(&format!(
-        "  loan token          : {}\n",
-        checksum(&o.market.loan_token)
-    ));
+    s.push_str(&format!("  loan token          : {}\n", market.loan_token));
     s.push_str(&format!("  reduce only         : {}\n", o.reduce_only));
     s.push_str(&format!(
         "  continuous fee cap  : {}\n",
-        u256_dec(&o.continuous_fee_cap)
+        word_text(&o.continuous_fee_cap)
     ));
     if o.callback != [0u8; 20] {
         s.push_str(&format!(
@@ -200,16 +298,10 @@ pub fn offer_text(o: &Offer, now: Option<u64>) -> String {
     }
     s.push_str(&format!(
         "  collateral params   : {}\n",
-        o.market.collateral_params.len()
+        market.collateral_params.len()
     ));
-    for (i, cp) in o.market.collateral_params.iter().enumerate() {
-        s.push_str(&format!(
-            "    [{i}] token={} lltv={} cursor={} oracle={}\n",
-            checksum(&cp.token),
-            u256_dec(&cp.lltv),
-            u256_dec(&cp.liquidation_cursor),
-            checksum(&cp.oracle),
-        ));
+    for (i, params) in market.collateral_params.iter().enumerate() {
+        s.push_str(&format!("    [{i}] {params}\n"));
     }
     s
 }
@@ -272,7 +364,10 @@ pub fn take_text(t: &TakeCall, now: Option<u64>) -> String {
     s.push_str("ratifier data:\n");
     s.push_str(&ratifier_payload_text(&t.ratifier_data));
     s.push_str("taker args:\n");
-    s.push_str(&format!("  units               : {}\n", t.units));
+    s.push_str(&format!(
+        "  units               : {}\n",
+        decimal_text(t.units)
+    ));
     s.push_str(&format!("  taker               : {}\n", checksum(&t.taker)));
     s.push_str(&format!(
         "  receiver (taker sell): {}\n",
@@ -296,72 +391,55 @@ pub fn take_text(t: &TakeCall, now: Option<u64>) -> String {
 /// Render a decoded repay-and-withdraw position-management call.
 pub fn repay_withdraw_text(r: &RepayWithdrawCall) -> String {
     let mut s = String::new();
+    let market = market_text(&r.market);
     s.push_str("repay and withdraw:\n");
-    s.push_str(&format!(
-        "  chain id            : {}\n",
-        u256_dec(&r.market.chain_id)
-    ));
-    s.push_str(&format!(
-        "  midnight            : {}\n",
-        checksum(&r.market.midnight)
-    ));
-    s.push_str(&format!(
-        "  loan token          : {}\n",
-        checksum(&r.market.loan_token)
-    ));
-    s.push_str(&format!(
-        "  maturity            : {}\n",
-        u256_ts(&word_to_u256(&r.market.maturity))
-    ));
+    s.push_str(&format!("  chain id            : {}\n", market.chain_id));
+    s.push_str(&format!("  midnight            : {}\n", market.midnight));
+    s.push_str(&format!("  loan token          : {}\n", market.loan_token));
+    s.push_str(&format!("  maturity            : {}\n", market.maturity));
     s.push_str(&format!(
         "  rcf threshold       : {}\n",
-        u256_dec(&r.market.rcf_threshold)
+        market.rcf_threshold
     ));
-    s.push_str(&format!(
-        "  enter gate          : {}\n",
-        checksum(&r.market.enter_gate)
-    ));
+    s.push_str(&format!("  enter gate          : {}\n", market.enter_gate));
     s.push_str(&format!(
         "  liquidator gate     : {}\n",
-        checksum(&r.market.liquidator_gate)
+        market.liquidator_gate
     ));
     s.push_str(&format!(
         "  collateral params   : {}\n",
-        r.market.collateral_params.len()
+        market.collateral_params.len()
     ));
-    for (i, cp) in r.market.collateral_params.iter().enumerate() {
-        s.push_str(&format!(
-            "    [{i}] token={} lltv={} cursor={} oracle={}\n",
-            checksum(&cp.token),
-            u256_dec(&cp.lltv),
-            u256_dec(&cp.liquidation_cursor),
-            checksum(&cp.oracle),
-        ));
+    for (i, params) in market.collateral_params.iter().enumerate() {
+        s.push_str(&format!("    [{i}] {params}\n"));
     }
-    s.push_str(&format!("  repay assets        : {}\n", r.repay_assets));
+    s.push_str(&format!(
+        "  repay assets        : {}\n",
+        u256_text(&r.repay_assets)
+    ));
     s.push_str(&format!(
         "  on behalf           : {}\n",
         checksum(&r.on_behalf)
     ));
     s.push_str(&format!(
         "  loan token permit   : {}\n",
-        permit_str(&r.loan_token_permit)
+        permit_text(&r.loan_token_permit)
     ));
     s.push_str(&format!(
         "  collateral withdrawals : {}\n",
         r.collateral_withdrawals.len()
     ));
     for (i, withdrawal) in r.collateral_withdrawals.iter().enumerate() {
-        s.push_str(&format!(
-            "    [{i}] index={} assets={}\n",
-            withdrawal.collateral_index, withdrawal.assets
-        ));
+        s.push_str(&format!("    [{i}] {}\n", withdrawal_text(withdrawal)));
     }
     s.push_str(&format!(
         "  collateral receiver : {}\n",
         checksum(&r.collateral_receiver)
     ));
-    s.push_str(&format!("  referral fee pct    : {}\n", r.referral_fee_pct));
+    s.push_str(&format!(
+        "  referral fee pct    : {}\n",
+        u256_text(&r.referral_fee_pct)
+    ));
     if r.referral_fee_pct != U256::ZERO {
         s.push_str(&format!(
             "  referral recipient  : {}\n",
@@ -375,26 +453,11 @@ pub fn repay_withdraw_text(r: &RepayWithdrawCall) -> String {
     s
 }
 
-/// Human label for a `TokenPermit`.
-fn permit_str(p: &TokenPermit) -> String {
-    let kind = match p.kind {
-        0 => "none".to_string(),
-        1 => "ERC2612".to_string(),
-        2 => "Permit2".to_string(),
-        k => format!("unknown({k})"),
-    };
-    if p.data.is_empty() {
-        kind
-    } else {
-        format!("{kind} ({} bytes)", p.data.len())
-    }
-}
-
 /// A `U256` with a timestamp reading when it fits in `u64`.
 fn u256_ts(v: &U256) -> String {
     match u64::try_from(*v) {
-        Ok(ts) => format!("{v} ({})", fmt_ts(ts)),
-        Err(_) => format!("{v} (large)"),
+        Ok(ts) => format!("{} ({})", u256_text(v), fmt_ts(ts)),
+        Err(_) => format!("{} (large)", u256_text(v)),
     }
 }
 
@@ -408,8 +471,16 @@ pub fn bundle_summary_text(b: &BundleCall) -> String {
     s.push_str(&format!("  fills               : {}\n", b.fills.len()));
     s.push_str(&format!("  taker               : {}\n", checksum(&b.taker)));
     s.push_str(&format!("  reduce only         : {}\n", b.reduce_only));
-    s.push_str(&format!("  {:<20}: {}\n", b.kind.target_label(), b.target));
-    s.push_str(&format!("  {:<20}: {}\n", b.kind.limit_label(), b.limit));
+    s.push_str(&format!(
+        "  {:<20}: {}\n",
+        b.kind.target_label(),
+        u256_text(&b.target)
+    ));
+    s.push_str(&format!(
+        "  {:<20}: {}\n",
+        b.kind.limit_label(),
+        u256_text(&b.limit)
+    ));
     match &b.side {
         BundleSide::Buy {
             loan_token_permit,
@@ -418,17 +489,14 @@ pub fn bundle_summary_text(b: &BundleCall) -> String {
         } => {
             s.push_str(&format!(
                 "  loan token permit   : {}\n",
-                permit_str(loan_token_permit)
+                permit_text(loan_token_permit)
             ));
             s.push_str(&format!(
                 "  collateral withdrawals : {}\n",
                 collateral_withdrawals.len()
             ));
             for (i, w) in collateral_withdrawals.iter().enumerate() {
-                s.push_str(&format!(
-                    "    [{i}] index={} assets={}\n",
-                    w.collateral_index, w.assets
-                ));
+                s.push_str(&format!("    [{i}] {}\n", withdrawal_text(w)));
             }
             s.push_str(&format!(
                 "  collateral receiver : {}\n",
@@ -445,16 +513,14 @@ pub fn bundle_summary_text(b: &BundleCall) -> String {
                 collateral_supplies.len()
             ));
             for (i, c) in collateral_supplies.iter().enumerate() {
-                s.push_str(&format!(
-                    "    [{i}] index={} assets={} permit={}\n",
-                    c.collateral_index,
-                    c.assets,
-                    permit_str(&c.permit)
-                ));
+                s.push_str(&format!("    [{i}] {}\n", supply_text(c)));
             }
         }
     }
-    s.push_str(&format!("  referral fee pct    : {}\n", b.referral_fee_pct));
+    s.push_str(&format!(
+        "  referral fee pct    : {}\n",
+        u256_text(&b.referral_fee_pct)
+    ));
     if b.referral_fee_pct != U256::ZERO {
         s.push_str(&format!(
             "  referral recipient  : {}\n",
@@ -463,7 +529,7 @@ pub fn bundle_summary_text(b: &BundleCall) -> String {
     }
     s.push_str(&format!(
         "  max continuous fee  : {}\n",
-        b.max_continuous_fee
+        u256_text(&b.max_continuous_fee)
     ));
     s.push_str(&format!(
         "  deadline            : {}\n",
@@ -479,7 +545,10 @@ pub fn fill_text(fill: &OfferFill, now: Option<u64>) -> String {
     s.push_str(&offer_text(&fill.offer, now));
     s.push_str("ratifier data:\n");
     s.push_str(&ratifier_payload_text(&fill.ratifier_data));
-    s.push_str(&format!("  units               : {}\n", fill.units));
+    s.push_str(&format!(
+        "  units               : {}\n",
+        decimal_text(fill.units)
+    ));
     s
 }
 
@@ -495,20 +564,56 @@ pub fn bundle_text(b: &BundleCall, now: Option<u64>) -> String {
 
 // ---- JSON builders -----------------------------------------------------------
 
+/// Canonical JSON representation of a token permit.
+fn permit_json(p: &TokenPermit) -> Value {
+    json!({
+        "kind": p.kind,
+        "data": bytes_json(&p.data),
+    })
+}
+
+/// Canonical JSON representation of a collateral withdrawal.
+///
+/// `assets` is a token-native amount, not a human-unit decimal.
+fn withdrawal_json(w: &CollateralWithdrawal) -> Value {
+    json!({
+        "collateralIndex": u256_json(&w.collateral_index),
+        "assets": u256_json(&w.assets),
+    })
+}
+
+fn withdrawals_json(withdrawals: &[CollateralWithdrawal]) -> Value {
+    Value::Array(withdrawals.iter().map(withdrawal_json).collect())
+}
+
+/// Canonical JSON representation of a collateral supply.
+fn supply_json(c: &CollateralSupply) -> Value {
+    json!({
+        "collateralIndex": u256_json(&c.collateral_index),
+        "assets": u256_json(&c.assets),
+        "permit": permit_json(&c.permit),
+    })
+}
+
+fn supplies_json(supplies: &[CollateralSupply]) -> Value {
+    Value::Array(supplies.iter().map(supply_json).collect())
+}
+
+/// Canonical JSON representation of a market shared by offers and position actions.
 fn market_json(m: &Market) -> Value {
     json!({
-        "chainId": u256_dec(&m.chain_id),
-        "midnight": checksum(&m.midnight),
-        "loanToken": checksum(&m.loan_token),
-        "maturity": u256_dec(&m.maturity),
-        "rcfThreshold": u256_dec(&m.rcf_threshold),
-        "enterGate": checksum(&m.enter_gate),
-        "liquidatorGate": checksum(&m.liquidator_gate),
+        "chainId": word_json(&m.chain_id),
+        "midnight": address_json(&m.midnight),
+        "loanToken": address_json(&m.loan_token),
+        "maturity": word_json(&m.maturity),
+        "rcfThreshold": word_json(&m.rcf_threshold),
+        "enterGate": address_json(&m.enter_gate),
+        "liquidatorGate": address_json(&m.liquidator_gate),
         "collateralParams": m.collateral_params.iter().map(|cp| json!({
-            "token": checksum(&cp.token),
-            "lltv": u256_dec(&cp.lltv),
-            "liquidationCursor": u256_dec(&cp.liquidation_cursor),
-            "oracle": checksum(&cp.oracle),
+            "token": address_json(&cp.token),
+            "lltv": word_json(&cp.lltv),
+            "liquidationCursor": word_json(&cp.liquidation_cursor),
+            "oracle": address_json(&cp.oracle),
         })).collect::<Vec<_>>(),
     })
 }
@@ -517,40 +622,40 @@ pub fn offer_json(o: &Offer) -> Value {
     json!({
         "market": market_json(&o.market),
         "buy": o.buy,
-        "maker": checksum(&o.maker),
-        "start": u256_dec(&o.start),
-        "expiry": u256_dec(&o.expiry),
-        "tick": u256_dec(&o.tick),
-        "group": hex_bytes(&o.group),
-        "callback": checksum(&o.callback),
-        "callbackData": hex_bytes(&o.callback_data),
-        "receiverIfMakerIsSeller": checksum(&o.receiver_if_maker_is_seller),
-        "ratifier": checksum(&o.ratifier),
+        "maker": address_json(&o.maker),
+        "start": word_json(&o.start),
+        "expiry": word_json(&o.expiry),
+        "tick": word_json(&o.tick),
+        "group": bytes_json(&o.group),
+        "callback": address_json(&o.callback),
+        "callbackData": bytes_json(&o.callback_data),
+        "receiverIfMakerIsSeller": address_json(&o.receiver_if_maker_is_seller),
+        "ratifier": address_json(&o.ratifier),
         "reduceOnly": o.reduce_only,
-        "maxUnits": o.max_units.to_string(),
-        "maxAssets": o.max_assets.to_string(),
-        "continuousFeeCap": u256_dec(&o.continuous_fee_cap),
+        "maxUnits": decimal_json(o.max_units),
+        "maxAssets": decimal_json(o.max_assets),
+        "continuousFeeCap": word_json(&o.continuous_fee_cap),
     })
 }
 
 pub fn ratifier_json(rd: &RatifierData) -> Value {
     json!({
         "type": "ecrecover",
-        "signature": { "v": rd.sig.v, "r": hex_bytes(&rd.sig.r), "s": hex_bytes(&rd.sig.s) },
-        "root": hex_bytes(&rd.root),
+        "signature": { "v": rd.sig.v, "r": bytes_json(&rd.sig.r), "s": bytes_json(&rd.sig.s) },
+        "root": bytes_json(&rd.root),
         "leafIndex": rd.leaf_index,
         "treeHeight": rd.proof.len(),
-        "proof": rd.proof.iter().map(|p| hex_bytes(p)).collect::<Vec<_>>(),
+        "proof": rd.proof.iter().map(|p| bytes_json(p)).collect::<Vec<_>>(),
     })
 }
 
 pub fn setter_ratifier_json(rd: &SetterRatifierData) -> Value {
     json!({
         "type": "setter",
-        "root": hex_bytes(&rd.root),
+        "root": bytes_json(&rd.root),
         "leafIndex": rd.leaf_index,
         "treeHeight": rd.proof.len(),
-        "proof": rd.proof.iter().map(|p| hex_bytes(p)).collect::<Vec<_>>(),
+        "proof": rd.proof.iter().map(|p| bytes_json(p)).collect::<Vec<_>>(),
     })
 }
 
@@ -565,11 +670,11 @@ pub fn take_json(t: &TakeCall) -> Value {
     json!({
         "offer": offer_json(&t.offer),
         "ratifierData": ratifier_payload_json(&t.ratifier_data),
-        "units": t.units.to_string(),
-        "taker": checksum(&t.taker),
-        "receiverIfTakerIsSeller": checksum(&t.receiver_if_taker_is_seller),
-        "takerCallback": checksum(&t.taker_callback),
-        "takerCallbackData": hex_bytes(&t.taker_callback_data),
+        "units": u256_json(&t.units),
+        "taker": address_json(&t.taker),
+        "receiverIfTakerIsSeller": address_json(&t.receiver_if_taker_is_seller),
+        "takerCallback": address_json(&t.taker_callback),
+        "takerCallbackData": bytes_json(&t.taker_callback_data),
     })
 }
 
@@ -577,20 +682,14 @@ pub fn repay_withdraw_json(r: &RepayWithdrawCall) -> Value {
     json!({
         "function": "midnightBundlesV1RepayAndWithdrawCollateral",
         "market": market_json(&r.market),
-        "repayAssets": r.repay_assets.to_string(),
-        "onBehalf": checksum(&r.on_behalf),
-        "loanTokenPermit": {
-            "kind": r.loan_token_permit.kind,
-            "data": hex_bytes(&r.loan_token_permit.data),
-        },
-        "collateralWithdrawals": r.collateral_withdrawals.iter().map(|w| json!({
-            "collateralIndex": w.collateral_index.to_string(),
-            "assets": w.assets.to_string(),
-        })).collect::<Vec<_>>(),
-        "collateralReceiver": checksum(&r.collateral_receiver),
-        "referralFeePct": r.referral_fee_pct.to_string(),
-        "referralFeeRecipient": checksum(&r.referral_fee_recipient),
-        "deadline": r.deadline.to_string(),
+        "repayAssets": u256_json(&r.repay_assets),
+        "onBehalf": address_json(&r.on_behalf),
+        "loanTokenPermit": permit_json(&r.loan_token_permit),
+        "collateralWithdrawals": withdrawals_json(&r.collateral_withdrawals),
+        "collateralReceiver": address_json(&r.collateral_receiver),
+        "referralFeePct": u256_json(&r.referral_fee_pct),
+        "referralFeeRecipient": address_json(&r.referral_fee_recipient),
+        "deadline": u256_json(&r.deadline),
     })
 }
 
@@ -601,66 +700,59 @@ pub fn bundle_json(b: &BundleCall) -> Value {
             collateral_withdrawals,
             collateral_receiver,
         } => json!({
-            "loanTokenPermit": { "kind": loan_token_permit.kind, "data": hex_bytes(&loan_token_permit.data) },
-            "collateralWithdrawals": collateral_withdrawals.iter().map(|w| json!({
-                "collateralIndex": w.collateral_index.to_string(),
-                "assets": w.assets.to_string(),
-            })).collect::<Vec<_>>(),
-            "collateralReceiver": checksum(collateral_receiver),
+            "loanTokenPermit": permit_json(loan_token_permit),
+            "collateralWithdrawals": withdrawals_json(collateral_withdrawals),
+            "collateralReceiver": address_json(collateral_receiver),
         }),
         BundleSide::Sell {
             receiver,
             collateral_supplies,
         } => json!({
-            "receiver": checksum(receiver),
-            "collateralSupplies": collateral_supplies.iter().map(|c| json!({
-                "collateralIndex": c.collateral_index.to_string(),
-                "assets": c.assets.to_string(),
-                "permit": { "kind": c.permit.kind, "data": hex_bytes(&c.permit.data) },
-            })).collect::<Vec<_>>(),
+            "receiver": address_json(receiver),
+            "collateralSupplies": supplies_json(collateral_supplies),
         }),
     };
     json!({
         "function": b.kind.function_name(),
-        "target": b.target.to_string(),
-        "limit": b.limit.to_string(),
-        "taker": checksum(&b.taker),
+        "target": u256_json(&b.target),
+        "limit": u256_json(&b.limit),
+        "taker": address_json(&b.taker),
         "reduceOnly": b.reduce_only,
         "side": side,
         "fills": b.fills.iter().map(|f| json!({
             "offer": offer_json(&f.offer),
             "ratifierData": ratifier_payload_json(&f.ratifier_data),
-            "units": f.units.to_string(),
+            "units": u256_json(&f.units),
         })).collect::<Vec<_>>(),
-        "referralFeePct": b.referral_fee_pct.to_string(),
-        "referralFeeRecipient": checksum(&b.referral_fee_recipient),
-        "maxContinuousFee": b.max_continuous_fee.to_string(),
-        "deadline": b.deadline.to_string(),
+        "referralFeePct": u256_json(&b.referral_fee_pct),
+        "referralFeeRecipient": address_json(&b.referral_fee_recipient),
+        "maxContinuousFee": u256_json(&b.max_continuous_fee),
+        "deadline": u256_json(&b.deadline),
     })
 }
 
 pub fn cancel_json(maker: &Address, root: &Word) -> Value {
     json!({
-        "maker": checksum(maker),
-        "root": hex_bytes(root),
+        "maker": address_json(maker),
+        "root": bytes_json(root),
     })
 }
 
 pub fn ratify_json(r: &RatifyCall) -> Value {
     json!({
-        "maker": checksum(&r.maker),
-        "root": hex_bytes(&r.root),
+        "maker": address_json(&r.maker),
+        "root": bytes_json(&r.root),
         "ratified": r.ratified,
     })
 }
 
 pub fn market_state_json(m: &MarketStateView) -> Value {
     json!({
-        "totalUnits": m.total_units.to_string(),
-        "lossFactor": m.loss_factor.to_string(),
+        "totalUnits": decimal_json(m.total_units),
+        "lossFactor": decimal_json(m.loss_factor),
         "lossFactorMaxed": m.loss_factor == u128::MAX,
-        "withdrawable": m.withdrawable.to_string(),
-        "continuousFeeCredit": m.continuous_fee_credit.to_string(),
+        "withdrawable": decimal_json(m.withdrawable),
+        "continuousFeeCredit": decimal_json(m.continuous_fee_credit),
         "settlementFeeCbp": m.settlement_fee_cbp,
         "continuousFee": m.continuous_fee,
         "tickSpacing": m.tick_spacing,
@@ -669,12 +761,12 @@ pub fn market_state_json(m: &MarketStateView) -> Value {
 
 pub fn position_json(p: &PositionView) -> Value {
     json!({
-        "credit": p.credit.to_string(),
-        "pendingFee": p.pending_fee.to_string(),
-        "lastLossFactor": p.last_loss_factor.to_string(),
-        "lastAccrual": p.last_accrual.to_string(),
-        "debt": p.debt.to_string(),
-        "collateralBitmap": p.collateral_bitmap.to_string(),
+        "credit": decimal_json(p.credit),
+        "pendingFee": decimal_json(p.pending_fee),
+        "lastLossFactor": decimal_json(p.last_loss_factor),
+        "lastAccrual": decimal_json(p.last_accrual),
+        "debt": decimal_json(p.debt),
+        "collateralBitmap": decimal_json(p.collateral_bitmap),
     })
 }
 
@@ -732,5 +824,147 @@ mod tests {
     fn timestamp_formats() {
         assert_eq!(fmt_ts(0), "1970-01-01 00:00:00 UTC");
         assert_eq!(fmt_ts(1_700_000_000), "2023-11-14 22:13:20 UTC");
+    }
+
+    #[test]
+    fn oversized_words_are_not_truncated_to_u64() {
+        let oversized = word_from_u128(u64::MAX as u128 + 1);
+        assert_eq!(u64_of(&oversized), None);
+        assert_eq!(tick_of(&oversized), None);
+        assert_eq!(apr_str(3372, Some(0), None), "(maturity too large)");
+    }
+
+    #[test]
+    fn shared_json_renderers_use_lossless_canonical_values() {
+        let permit = TokenPermit {
+            kind: 2,
+            data: vec![0xde, 0xad],
+        };
+        assert_eq!(permit_json(&permit), json!({"kind": 2, "data": "0xdead"}));
+        assert_eq!(permit_text(&permit), "Permit2 (2 bytes)");
+
+        let withdrawal = CollateralWithdrawal {
+            collateral_index: U256::from(3u64),
+            assets: U256::from(4_000u64),
+        };
+        assert_eq!(
+            withdrawal_json(&withdrawal),
+            json!({"collateralIndex": "3", "assets": "4000"})
+        );
+        assert_eq!(withdrawal_text(&withdrawal), "index=3 assets=4000");
+
+        let supply = CollateralSupply {
+            collateral_index: U256::from(5u64),
+            assets: U256::from(6_000u64),
+            permit: permit.clone(),
+        };
+        assert_eq!(
+            supply_json(&supply),
+            json!({
+                "collateralIndex": "5",
+                "assets": "6000",
+                "permit": {"kind": 2, "data": "0xdead"},
+            })
+        );
+        assert_eq!(
+            supply_text(&supply),
+            "index=5 assets=6000 permit=Permit2 (2 bytes)"
+        );
+
+        let large = U256::from(u128::MAX) + U256::from(1u64);
+        assert_eq!(u256_json(&large), Value::String(large.to_string()));
+        assert_eq!(
+            decimal_json(u128::MAX),
+            Value::String(u128::MAX.to_string())
+        );
+    }
+
+    #[test]
+    fn market_text_and_json_share_the_same_fields() {
+        let market = Market {
+            chain_id: word_from_u64(31_337),
+            midnight: [0x11; 20],
+            loan_token: [0x22; 20],
+            collateral_params: vec![CollateralParams {
+                token: [0x33; 20],
+                lltv: word_from_u128(770_000_000_000_000_000),
+                liquidation_cursor: word_from_u128(300_000_000_000_000_000),
+                oracle: [0x44; 20],
+            }],
+            maturity: word_from_u64(4_000_000_000),
+            rcf_threshold: word_from_u64(1_000),
+            enter_gate: [0x55; 20],
+            liquidator_gate: [0x66; 20],
+        };
+
+        let value = market_json(&market);
+        assert_eq!(value["chainId"], "31337");
+        assert_eq!(value["maturity"], "4000000000");
+        assert_eq!(value["collateralParams"][0]["lltv"], "770000000000000000");
+
+        let text = market_text(&market);
+        assert_eq!(text.chain_id, "31337");
+        assert_eq!(text.maturity, "4000000000 (2096-10-02 07:06:40 UTC)");
+        assert_eq!(text.collateral_params[0], "token=0x3333333333333333333333333333333333333333 lltv=770000000000000000 cursor=300000000000000000 oracle=0x4444444444444444444444444444444444444444");
+    }
+
+    #[test]
+    fn bundle_json_uses_shared_side_renderers() {
+        let withdrawal = CollateralWithdrawal {
+            collateral_index: U256::from(3u64),
+            assets: U256::from(4_000u64),
+        };
+        let permit = TokenPermit {
+            kind: 1,
+            data: vec![0xaa],
+        };
+        let buy = BundleCall {
+            kind: BundleKind::BuyWithUnitsTarget,
+            target: U256::from(1u64),
+            limit: U256::from(2u64),
+            taker: [0x11; 20],
+            reduce_only: false,
+            side: BundleSide::Buy {
+                loan_token_permit: permit.clone(),
+                collateral_withdrawals: vec![withdrawal],
+                collateral_receiver: [0x22; 20],
+            },
+            fills: Vec::new(),
+            referral_fee_pct: U256::ZERO,
+            referral_fee_recipient: [0u8; 20],
+            max_continuous_fee: U256::ZERO,
+            deadline: U256::from(10u64),
+        };
+        let buy_json = bundle_json(&buy);
+        assert_eq!(
+            buy_json["side"]["loanTokenPermit"],
+            json!({"kind": 1, "data": "0xaa"})
+        );
+        assert_eq!(
+            buy_json["side"]["collateralWithdrawals"][0],
+            json!({"collateralIndex": "3", "assets": "4000"})
+        );
+
+        let sell = BundleCall {
+            kind: BundleKind::SellWithUnitsTarget,
+            side: BundleSide::Sell {
+                receiver: [0x33; 20],
+                collateral_supplies: vec![CollateralSupply {
+                    collateral_index: U256::from(5u64),
+                    assets: U256::from(6_000u64),
+                    permit,
+                }],
+            },
+            ..buy
+        };
+        let sell_json = bundle_json(&sell);
+        assert_eq!(
+            sell_json["side"]["collateralSupplies"][0],
+            json!({
+                "collateralIndex": "5",
+                "assets": "6000",
+                "permit": {"kind": 1, "data": "0xaa"},
+            })
+        );
     }
 }

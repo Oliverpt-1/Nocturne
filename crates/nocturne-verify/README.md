@@ -142,6 +142,12 @@ automatically; getter return data needs `--type` because it has no selector.
 call, including its market, repayment amount, permit, collateral withdrawals, receiver, referral
 fields, and deadline.
 
+JSON rendering uses the same representation for shared values in offers, bundles, and position
+actions: addresses are EIP-55 checksummed strings, bytes are `0x`-prefixed lowercase hex, and
+`uint256` values are decimal strings so large values remain lossless. `referralFeePct` and `lltv`
+are WAD-scaled (`1e18` is 100%); other protocol integers such as `rcfThreshold` remain raw
+decimal values. Collateral `assets` are token-native base units.
+
 ## Exit codes
 
 | Code | Meaning |
